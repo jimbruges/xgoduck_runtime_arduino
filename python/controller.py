@@ -10,6 +10,7 @@ from recovery import Recovery
 from proc import SignalFilter
 from rl_core import MOTOR_IDS, HOME_DEG, DEFAULT_DEG, GRAVITY_TAU, IMU_BIAS_DEG, MOUTH_INDEX, MOUTH_MAX_DEG
 from wire import *
+import pad
 
 FACTORY_ZERO = [
     2236, 2005, 1912, 1866, 1945,
@@ -24,6 +25,13 @@ PICK_MOUTH_CLOSE_PHI = 0.4
 ROULADE_S = 1.9
 ROULADE_ALPHA = 0.15
 CONTROL_PERIOD = 0.02
+# Default pose (hold) has no policy, so head channels 1-4 (IDs 30-33: neck pitch, head pitch,
+# head yaw, head roll) offset those joints directly: ±1 maps to ± these degrees, inside the
+# model's joint ranges, and the offset moves at most HEAD_HOLD_STEP_DEG per 20 ms tick.
+HEAD_HOLD_RANGE_DEG = (30.0, 35.0, 60.0, 20.0)
+HEAD_HOLD_STEP_DEG = 2.0
+HEAD_INDICES = [MOTOR_IDS.index(i) for i in (30, 31, 32, 33)]
+PAD_ACTIVE_S = 0.3  # a pad sample this recent overrides page motion and keeps the heartbeat
 
 class Controller:
     def __init__(self, bridge):
@@ -65,6 +73,11 @@ class Controller:
         self.generation = 0
         self.twist, self.head, self.mouth = [0.0]*3, [0.0]*4, 0.0
         self.web_time = 0.0
+        self.hold_head = [0.0]*4  # applied head offsets in Default pose, degrees
+        self.pad = pad.Mapper()
+        self.pad_time = 0.0
+        self.pad_state = {'connected': False}
+        self.pad_error = ''
         self.arm_pending = False
         self.seq = self.received = self.inferred = self.sent = self.bad_frames = self.gaps = 0
         self.last_error = ''
@@ -312,11 +325,63 @@ class Controller:
         with self.lock:
             if self.mode in EXCLUSIVE_MODES:
                 raise ValueError('motion commands disabled in calibrate/servo_debug')
+            if time.monotonic()-self.pad_time < PAD_ACTIVE_S:
+                # A connected controller drives motion; the page only refreshes the heartbeat.
+                self.web_time = time.monotonic()
+                return {'ok': True, 'pad': True}
             if t is not None and not self.pick_active: self.twist = t
             if h is not None and not self.pick_active: self.head = h
             if m is not None and not self.pick_active: self.mouth = m
             self.web_time = time.monotonic()
         return {'ok': True}
+
+    def pad_input(self, state):
+        """One gamepad sample from host/pad_helper.py: run mapped actions, set motion."""
+        state = dict(state or {})
+        now = time.monotonic()
+        with self.lock:
+            was_active = now-self.pad_time < PAD_ACTIVE_S
+            self.pad_state = {k: state.get(k) for k in ('connected', 'name', 'mac', 'buttons', 'axes')}
+            if not state.get('connected'):
+                self.pad_time = 0.0
+                self.pad.reset()
+                if was_active:
+                    self.twist = [0.0]*3
+                return {'ok': True}
+            self.pad_time = now
+            exclusive = self.mode in EXCLUSIVE_MODES
+        edge, twist, head, mouth = self.pad.apply(state.get('buttons') or [], state.get('axes') or {})
+        if exclusive:
+            return {'ok': True}  # calibration and servo setup ignore the controller
+        for action in edge:
+            try:
+                if action.startswith('mode:'):
+                    self.set_mode(action[5:])
+                elif action == 'pick':
+                    self.start_pick()
+                elif action == 'roulade':
+                    self.start_roulade()
+                self.pad_error = ''
+            except ValueError as exc:
+                self.pad_error = f'{pad.ACTIONS[action]}: {exc}'
+        with self.lock:
+            if self.mode in EXCLUSIVE_MODES or self.pick_active:
+                return {'ok': True}
+            if twist is not None: self.twist = twist
+            if head is not None: self.head = head
+            if mouth is not None: self.mouth = mouth
+        return {'ok': True}
+
+    def pad_config(self):
+        return {'config': self.pad.config, 'actions': pad.ACTIONS, 'axis_targets': pad.AXIS_TARGETS,
+                'defaults': pad.validate(pad.DEFAULT_CONFIG)}
+
+    def set_pad_config(self, config):
+        saved = pad.save(config)
+        with self.lock:
+            self.pad.config = saved
+            self.pad.reset()
+        return {'ok': True, 'config': saved}
 
     def cal_targets_set(self, targets):
         # null leaves a joint unpowered; the MCU energizes a joint on its first target.
@@ -466,13 +531,18 @@ class Controller:
 
     def step(self):
         with self.lock:
+            if self.pad_time and time.monotonic()-self.pad_time > PAD_ACTIVE_S:
+                # Controller samples stopped (helper or pad gone): drop its motion.
+                self.pad_time = 0.0
+                self.pad.reset()
+                self.twist = [0.0]*3
             fb, filt, generation, mode = self.feedback, self.filtered, self.generation, self.mode
             age = time.monotonic()-self.rx_time
             if mode in ('hold','policy'):
                 lost = None
                 if not fb or age>.15 or not fb.imu_ok:
                     lost = 'sensor feedback lost; disarmed'
-                elif time.monotonic()-self.web_time > 1.0:
+                elif time.monotonic()-max(self.web_time, self.pad_time) > 1.0:
                     lost = 'web heartbeat lost; disarmed'
                 if lost:
                     self.mode = mode = 'shadow'; self.generation += 1
@@ -574,6 +644,14 @@ class Controller:
             else:
                 target = list(target)
                 target[MOUTH_INDEX] = mouth
+                if mode == 'hold':
+                    for k, idx in enumerate(HEAD_INDICES):
+                        want = max(-1.0, min(1.0, head[k])) * HEAD_HOLD_RANGE_DEG[k]
+                        step = max(-HEAD_HOLD_STEP_DEG, min(HEAD_HOLD_STEP_DEG, want - self.hold_head[k]))
+                        self.hold_head[k] += step
+                        target[idx] += self.hold_head[k]
+            if mode != 'hold':
+                self.hold_head = [0.0]*4
             if fb is None: return
             self.last_action = list(target)
             self.seq = (self.seq+1)&0xffffffff
@@ -669,6 +747,8 @@ class Controller:
                 cal_targets=list(self.cal_targets), raw_mask=self.raw_mask)
             result['control_ready']=bool(fb and fb.imu_ok and now-self.rx_time<.15 and self.mode not in EXCLUSIVE_MODES)
             result['servo_scan_version'] = 1
+            result['pad'] = dict(self.pad_state, active=now-self.pad_time < PAD_ACTIVE_S,
+                                 error=self.pad_error)
             result['deployment'] = dict(reference='rl/raspi_deploy', control_hz=50,
                 home_deg=HOME_DEG.tolist(), default_deg=DEFAULT_DEG,
                 action_scale=self.policy.action_scale, action_alpha=self.policy.action_alpha,

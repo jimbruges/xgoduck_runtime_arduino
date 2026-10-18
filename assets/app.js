@@ -1,6 +1,7 @@
 const $=id=>document.getElementById(id);
 let statusBusy=false, commandBusy=false, commandPending=false;
-for(let i=0;i<4;i++) $('head-controls').insertAdjacentHTML('beforeend',`<label>head ${i+1}<input id="head${i}" type="range" min="-1" max="1" value="0" step="0.02"></label>`);
+const HEAD_LABELS=['Neck pitch 30','Head pitch 31','Head yaw 32','Head roll 33'];
+for(let i=0;i<4;i++) $('head-controls').insertAdjacentHTML('beforeend',`<label>${HEAD_LABELS[i]}<input id="head${i}" type="range" min="-1" max="1" value="0" step="0.02"></label>`);
 $('head-controls').insertAdjacentHTML('beforeend','<label>Mouth 34 (°)<input id="mouth" type="range" min="0" max="30" value="0" step="1"></label>');
 async function post(path, body){const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const x=await r.json();if(!r.ok)throw new Error(x.detail||'request failed');return x;}
 function showError(e){$('message').textContent=e.message;}
@@ -9,7 +10,8 @@ document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.data
 $('pick').onclick=async()=>{try{const r=await post('pick',{});$('message').textContent=`Pick started · ${r.model}`;}catch(e){showError(e);}};
 $('roulade').onclick=async()=>{try{const r=await post('roulade',{});$('message').textContent=`Roulade · ${r.model}`;}catch(e){showError(e);}};
 $('stop').onclick=()=>{zero();setMode('off')};
-const keys=new Set(), sticks={left:{x:0,y:0},right:{x:0,y:0}}, resetSticks=[];
+const keys=new Set(), sticks={left:{x:0,y:0},right:{x:0,y:0}}, resetSticks=[], knobs={};
+let padDriving=false;
 let motion=[0,0,0];
 const deadzone=v=>Math.abs(v)<.1?0:v;
 function updateMotion(){
@@ -35,6 +37,7 @@ function joystick(id,side){
     if(old!==null&&zone.hasPointerCapture(old))zone.releasePointerCapture(old);
   }
   resetSticks.push(reset);
+  knobs[side]=(x,y)=>{const radius=(zone.clientWidth-knob.offsetWidth)/2;knob.style.transform=`translate(${x*radius}px,${-y*radius}px)`;};
   function move(e){
     const b=zone.getBoundingClientRect(),radius=(zone.clientWidth-knob.offsetWidth)/2;
     let dx=e.clientX-b.left-b.width/2,dy=e.clientY-b.top-b.height/2;
@@ -43,7 +46,7 @@ function joystick(id,side){
     knob.style.transform=`translate(${dx}px,${dy}px)`;
     sticks[side]={x:dx/radius,y:-dy/radius};updateMotion();
   }
-  zone.onpointerdown=e=>{if(pointer!==null||e.button!==0)return;e.preventDefault();pointer=e.pointerId;zone.setPointerCapture(pointer);move(e);sendCommand();};
+  zone.onpointerdown=e=>{if(padDriving||pointer!==null||e.button!==0)return;e.preventDefault();pointer=e.pointerId;zone.setPointerCapture(pointer);move(e);sendCommand();};
   zone.onpointermove=e=>{if(e.pointerId===pointer)move(e);};
   const release=e=>{if(e.pointerId!==pointer)return;reset();updateMotion();sendCommand();};
   zone.onpointerup=zone.onpointercancel=zone.onlostpointercapture=release;
@@ -71,5 +74,15 @@ $('recovery-timer').textContent=!recovery.active?'—':roulade&&roulade.active?`
 if(pick&&pick.active)$('mouth').value=Math.round(s.mouth||0);}
 for(const [id,values]of [['acc-values',s.acc],['gyro-values',s.gyro],['gravity-values',s.gravity]])$(id).textContent=values?values.map(x=>x.toFixed(3)).join(' / '):'—';
 $('command-health').textContent=`sent ${s.sent} · MCU echo ${s.mcu_command_seq??'—'} · command age ${s.mcu_command_age_us<1e9?(s.mcu_command_age_us/1000).toFixed(1)+' ms':'—'} · gaps ${s.sequence_gaps} · rejected ${s.mcu_invalid_commands??0}`;
+const pad=s.pad||{};
+// While a controller drives motion, show the commands actually in effect.
+const driving=!!(pad.connected&&pad.active);
+if(driving){const [vx,vy,wz]=s.command||[0,0,0];
+  knobs.left&&knobs.left(-vy/.3,vx/.4);knobs.right&&knobs.right(-wz/1,0);
+  ['vx','vy','wz'].forEach((id,i)=>$(id+'Value').textContent=(s.command||[0,0,0])[i].toFixed(2));
+  (s.head||[]).forEach((v,i)=>$('head'+i).value=v);$('mouth').value=Math.round(s.mouth||0);}
+else if(padDriving){resetSticks.forEach(r=>r());updateMotion();}
+padDriving=driving;document.querySelectorAll('.joy,#head-controls input').forEach(el=>el.classList.toggle('pad-driven',driving));
+document.querySelectorAll('#head-controls input').forEach(el=>el.disabled=driving);$('pad-note').textContent=pad.connected?`Controller: ${pad.name||'connected'}${pad.active?' · its sticks drive motion; these pads are ignored':''}${pad.error?' · '+pad.error:''}`:'No Bluetooth controller connected. Pair one on the Controller page.';
 if(s.angles)$('joints').innerHTML=s.motors.map((id,i)=>`<tr class="${s.servo_ids.includes(id)?'':'missing'}"><td>${id}</td><td>${s.angles[i].toFixed(1)}</td><td>${s.targets[i].toFixed(1)}</td></tr>`).join('');
 }catch(e){showError(e);}finally{statusBusy=false;}},250);

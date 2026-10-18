@@ -14,7 +14,7 @@ struct k_mutex motorsMu;
 // Avoid iterable kernel-object sections in the loadable sketch.
 static struct k_mutex commandMu, stateMu, hostMu;
 static struct k_sem reportReady;
-K_THREAD_STACK_DEFINE(controlStack, 4096);
+K_THREAD_STACK_DEFINE(controlStack, 8192);  // servo register, cal and Finish ops run on this thread
 K_THREAD_STACK_DEFINE(reportStack, 4096);
 static struct k_thread controlThread, reportThread;
 static StatePacket snapshot = {};

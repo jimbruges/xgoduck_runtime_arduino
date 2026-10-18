@@ -1,0 +1,11 @@
+[Unit]
+Description=XGO Duck Bluetooth gamepad helper
+After=bluetooth.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/ArduinoApps/xgoduck/host/pad_helper.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -57,11 +57,26 @@ New MCU servo-setup ops (`sketch/protocol.h`, `python/wire.py`), available throu
 
 `write_offset` takes the raw register value (0–4095). Writing 0 removes an offset.
 
+## Bluetooth controller
+
+A Bluetooth gamepad can drive the robot, configured from a new **Controller** page. The App Lab container cannot reach BlueZ or `/dev/input`, so `host/pad_helper.py` runs on the host as a systemd user service (`tools/install-pad-helper.sh`). It pairs controllers through `bluetoothctl`, reads input events, and posts the state to the app at 50 Hz (`POST /api/pad`). The app proxies `/api/bt/*` to it.
+
+- **Pair new controller** pairs the first gamepad that starts advertising, so controllers that change address per mode still pair. Pairing turns on `pairable`, so BlueZ stores the bond and accepts the HID connection.
+- Buttons map to mode changes, pick, roulade, hold-to-open mouth and half speed. Sticks and triggers map to forward, strafe, turn, the four head channels and the mouth, with invert, trigger and deadzone options. Saved in `data/controller.json`.
+- While the controller sends input it overrides the Control page's motion and counts as the heartbeat. If it stops, motion zeroes within 0.3 s and the usual 1 s heartbeat disarms. Calibration and Servo setup ignore it.
+- The Control page mirrors the controller's commands on its joysticks and sliders.
+- Only generic HID modes work. The kernel lacks PlayStation and Nintendo drivers, so DualShock 4 or Switch Pro imitation modes send no input. On the GameSir Nova Lite use Android mode (A + Home, yellow).
+
+## Head channels in Default pose
+
+Upstream, the four head channels only feed the walk policy, so in Default pose they did nothing. Now in Default pose they drive the neck and head joints (IDs 30–33) directly: ±1 gives ±30°, ±35°, ±60° and ±20°, slewed at 100°/s. Walking is unchanged. The Control page labels them by joint.
+
 ## Notes from bring-up
 
 These are observations from one robot, not guarantees:
 
 - The HD-1910 servos' angle limits read 0/4095 (single-turn), yet their position readings can run past 4095 or below 0 (bit 15 set) until the servo is power-cycled.
-- After a sketch upload the MCU sometimes stayed silent, or received no host commands, until the Uno Q was fully power-cycled. App restarts did not clear it.
+- The MCU control thread's stack is 8 KB (upstream 4 KB), because the servo register, calibration and Finish ops now run on it.
+- After a sketch upload the MCU sometimes stayed silent, or received no host commands, until the Uno Q was fully power-cycled. App restarts did not clear it. Several of these coincided with a low or tripped battery; recharging and power-cycling cleared the last one.
 - The App CLI default app was set with `arduino-app-cli properties set default /home/arduino/ArduinoApps/xgoduck` so the app starts on boot. That is board configuration, not part of this repo.
 - `tools/test-servo-setup.py` still passes. The new firmware paths were tested on the robot (offset writes on all 15 servos, and Finish on one unpowered joint); Finish on a powered joint and on an out-of-range joint has not been exercised yet.

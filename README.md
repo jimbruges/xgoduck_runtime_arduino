@@ -215,7 +215,99 @@ The app boots in **inference only**: the network runs, torque stays off. From th
 
 Closing the page, or leaving it in the background for more than 1 second, turns position control off. Calibration and servo setup use a 2 second heartbeat and then exit and turn torque off.
 
-Walk commands are vx ±0.4, vy ±0.3, ωz ±1.0, with a joystick dead zone of 0.1. Head channels are four radians in ±1. Keyboard: W/S, A/D, Q/E, Space.
+Walk commands are vx ±0.4, vy ±0.3, ωz ±1.0, with a joystick dead zone of 0.1. The four head channels are ±1; see [Head in Default pose](#head-in-default-pose). Keyboard: W/S, A/D, Q/E, Space. A Bluetooth gamepad can also drive the robot; see [Bluetooth controller](#bluetooth-controller).
+
+## Bluetooth controller
+
+A Bluetooth gamepad can drive the robot, and the **Controller** page (`/controller.html`) pairs it and sets what each button and stick does.
+
+### How it is wired
+
+The App Lab container cannot reach BlueZ or `/dev/input`. App Lab generates its Docker settings without the `input` group, the input device class or the D-Bus socket, and regenerates them on every start. So a small helper runs on the Uno Q host instead:
+
+```text
+gamepad ── Bluetooth ──> BlueZ ──> /dev/input/eventN
+                                        │
+              host/pad_helper.py  (user service xgoduck-pad, port 9528)
+                │  POST /api/pad at 50 Hz              ▲ /bt/* pairing calls
+                ▼                                      │
+              app container  ── /api/bt/* proxy ───────┘  (msgpack-rpc-router = host gateway)
+```
+
+`host/pad_helper.py` uses only the standard library. It pairs, trusts, connects and forgets devices through `bluetoothctl`, reads the first connected gamepad's input events, and posts the button and stick state to the app. It accepts HTTP only from loopback and Docker bridge addresses.
+
+Install it once on the board (no sudo needed: user services start at boot because lingering is enabled for `arduino`):
+
+```bash
+tools/install-pad-helper.sh
+```
+
+### Pairing
+
+1. Open **Controller** and press **Pair new controller**.
+2. Within 60 s, put the controller in pairing mode. The page pairs the first gamepad that starts advertising, then trusts and connects it.
+3. A paired controller reconnects by itself whenever it is switched on.
+
+**Scan** lists nearby named devices; **Pair & connect**, **Connect**, **Disconnect** and **Forget** act on one. Pairing switches the adapter to pairable first. Without that, BlueZ pairs without storing a bond and then rejects the controller's HID connection ("Rejected connection from !bonded device").
+
+Use the controller's **Android** or generic HID mode. This board's kernel has no `hid-playstation`, `hid-sony` or `hid-nintendo` driver, and `/dev/hidraw*` is root-only. Modes that imitate a DualShock 4 (often labelled PC or PS4) or a Switch Pro controller pair, but send no input. Controllers can use a different Bluetooth address in each mode.
+
+| GameSir Nova Lite | Combo, from off | LED | Works |
+| --- | --- | --- | --- |
+| Android | A + Home | yellow, fast blink | yes |
+| PC | B + Home | blue | no (DualShock 4 imitation) |
+| Switch | Y + Home | red | no (Switch Pro imitation) |
+
+The Nova Lite leaves pairing mode after about a minute if nothing connects.
+
+### Mapping
+
+The **Live input** panel shows each button's name as you press it, and each axis value as you move a stick or trigger. The matching mapping row lights up. Mappings are saved on the robot in `data/controller.json`.
+
+| Button action | Effect |
+| --- | --- |
+| Torque off, Inference only, Default pose, Walk / get up | Switch mode, once per press. |
+| Pick, Roulade | Start that move, once per press. Same rules as the Control page. |
+| Open mouth (hold) | Mouth fully open while held. |
+| Half speed (hold) | Halve forward, strafe and turn while held. |
+
+| Axis target | Range |
+| --- | --- |
+| Forward / back, Strafe, Turn | Full stick = vx ±0.4, vy ±0.3, ωz ±1.0. |
+| Neck pitch, Head pitch, Head yaw, Head roll | ±1, see below. |
+| Mouth | 0–30°, linear over the trigger's travel. |
+
+Stick axes run −1 to +1, with up and left negative. Analog triggers reported as `gas` or `brake` run 0 (released) to 1. Tick **Invert** if an axis moves the robot the wrong way, and **Trigger** for an axis that rests at −1 (some pads report triggers as `lz` or `rz`). The deadzone applies to sticks.
+
+Default mapping:
+
+| Input | Action |
+| --- | --- |
+| south (A) | Walk / get up |
+| east (B) | Torque off |
+| west, north | Pick, Roulade |
+| start | Default pose |
+| select | Inference only |
+| l1 | Open mouth (hold) |
+| r1 | Half speed (hold) |
+| left stick | Forward / back and strafe |
+| right stick, horizontal | Turn |
+
+### Behaviour and safety
+
+- While a controller is sending input, its sticks drive motion and the Control page's joysticks and head sliders are ignored. The page mirrors the controller's commands instead.
+- A connected controller also counts as the heartbeat, so Default pose and Walk stay enabled without the page open.
+- If the controller disconnects, or the helper stops, motion zeroes within 0.3 s. Without a page open, position control turns off after 1 s.
+- Calibration and Servo setup ignore the controller.
+
+### Head in Default pose
+
+The four head channels are neck pitch, head pitch, head yaw and head roll (IDs 30–33).
+
+- **Walk:** they are inputs to the walk policy, which decides how far the head follows.
+- **Default pose:** there is no policy, so they move those joints directly from the default angles. ±1 gives ±30°, ±35°, ±60° and ±20° respectively, at most 2° per 20 ms tick (100°/s).
+
+This applies whether the head is set from the Control page or the controller.
 
 ## Policies
 
@@ -252,6 +344,8 @@ python/                  Host policy, Bridge client, ONNX models
 sketch/                  STM32 firmware
 data/zero_pos.json       Created on the robot by calibration (not in git)
 tools/                   Bridge patch, router rate, ELF check, read-only capture
+host/                    Bluetooth gamepad helper and its systemd user unit (runs on the host)
+data/controller.json     Controller mapping, saved from the Controller page (not in git)
 FORK.md                  What this fork changes from upstream
 ```
 

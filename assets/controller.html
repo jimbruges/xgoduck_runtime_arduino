@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Controller · XGO Duck</title><link rel="stylesheet" href="style.css">
+<main>
+<header>
+  <div><small>ARDUINO UNO Q</small><h1>Controller</h1></div>
+  <div class="header-actions">
+    <nav class="nav"><a href="/">Control</a><a href="/calibrate.html">Calibration</a><a href="/servo.html">Servo setup</a><a href="/controller.html" aria-current="page">Controller</a></nav>
+  </div>
+</header>
+<p id="message">Loading…</p>
+
+<section>
+  <h2>Bluetooth <span id="bt-state">—</span></h2>
+  <div class="buttons">
+    <button id="autopair">Pair new controller</button>
+    <button id="scan">Scan</button>
+    <button id="refresh">Refresh</button>
+  </div>
+  <p id="autopair-msg" class="pad-autopair"></p>
+  <p class="hint"><b>Pair new controller</b> searches for 60 s and pairs the first gamepad that starts advertising: click it, then put the controller in pairing mode (GameSir Nova Lite: from off, press A + Home until the LED fast-blinks yellow). Or <b>Scan</b> and use <b>Pair &amp; connect</b> on a listed device. A paired controller is trusted and reconnects by itself when switched on.</p>
+  <p class="hint">Use the controller's <b>Android</b> or generic HID mode. This board's kernel has no PlayStation or Nintendo drivers, so modes that imitate a DualShock 4 (often labelled PC or PS4) or a Switch Pro controller pair but send no input. On the GameSir Nova Lite, PC mode (B + Home, blue) is a DualShock 4 imitation; Android mode (A + Home, yellow) works.</p>
+  <div id="devices" class="pad-devices"></div>
+</section>
+
+<section>
+  <h2>Live input <span id="pad-name">no controller</span></h2>
+  <div id="pad-buttons" class="pad-chips"></div>
+  <div id="pad-axes" class="pad-axes"></div>
+  <p class="hint">Press a button or move a stick to see its name here; the matching mapping row lights up below. Calibration and Servo setup ignore the controller. While a controller is connected its sticks override the Control page joysticks, and it keeps Default pose and Walk enabled without the page open. If it disconnects, motion stops and the robot disarms after 1 s unless a page is open.</p>
+</section>
+
+<section>
+  <h2>Button mapping</h2>
+  <div id="map-buttons" class="pad-map"></div>
+  <h2 class="pad-sub">Stick and trigger mapping</h2>
+  <div id="map-axes" class="pad-map"></div>
+  <label class="pad-dz">Stick deadzone <input id="deadzone" type="number" min="0" max="0.5" step="0.01"></label>
+  <div class="buttons">
+    <button id="save">Save mapping</button>
+    <button id="defaults">Reset to defaults</button>
+  </div>
+  <p class="hint">Forward, strafe and turn are scaled to the walk limits (vx ±0.4, vy ±0.3, ωz ±1.0). Use <b>Invert</b> when a stick moves the robot the wrong way, and <b>Trigger</b> for an analog trigger that rests at −1 so it maps to 0…1. Hold actions (open mouth, half speed) apply only while the button is held; the others fire once per press.</p>
+</section>
+</main>
+<script src="controller.js"></script>
+</html>

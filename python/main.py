@@ -1,5 +1,8 @@
+import json
 import threading
 import sys
+import urllib.error
+import urllib.request
 from fastapi import HTTPException
 from arduino.app_utils import App, Bridge
 from arduino.app_bricks.web_ui import WebUI
@@ -69,7 +72,49 @@ def servo_action(body: dict):
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(400, str(exc))
 
+# Bluetooth pairing runs in host/pad_helper.py on the host: the app container has no BlueZ
+# access. Docker maps msgpack-rpc-router to the host gateway.
+PAD_HELPER = 'http://msgpack-rpc-router:9528'
+
+def helper(path, body=None, timeout=5):
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(PAD_HELPER+path, data, {'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        try: detail = json.loads(exc.read()).get('detail', str(exc))
+        except ValueError: detail = str(exc)
+        raise HTTPException(exc.code, detail)
+    except OSError as exc:
+        raise HTTPException(503, f'gamepad helper unreachable ({exc}); run tools/install-pad-helper.sh on the board')
+
+def bt_status():
+    return helper('/bt/status', timeout=15)
+
+def bt_action(action, timeout=5):
+    def handler(body: dict):
+        return helper('/bt/'+action, body, timeout)
+    return handler
+
+def pad_input(body: dict):
+    return controller.pad_input(body)
+
+def pad_config_set(body: dict):
+    try: return controller.set_pad_config(body.get('config', body))
+    except (TypeError, ValueError) as exc: raise HTTPException(400, str(exc))
+
 ui.expose_api('GET', '/api/status', controller.status)
+ui.expose_api('POST', '/api/pad', pad_input)
+ui.expose_api('GET', '/api/pad/config', controller.pad_config)
+ui.expose_api('POST', '/api/pad/config', pad_config_set)
+ui.expose_api('GET', '/api/bt/status', bt_status)
+ui.expose_api('POST', '/api/bt/scan', bt_action('scan'))
+ui.expose_api('POST', '/api/bt/autopair', bt_action('autopair'))
+ui.expose_api('POST', '/api/bt/pair', bt_action('pair', timeout=60))
+ui.expose_api('POST', '/api/bt/connect', bt_action('connect', timeout=25))
+ui.expose_api('POST', '/api/bt/disconnect', bt_action('disconnect', timeout=25))
+ui.expose_api('POST', '/api/bt/remove', bt_action('remove', timeout=25))
 ui.expose_api('POST', '/api/mode', mode)
 ui.expose_api('POST', '/api/command', command)
 ui.expose_api('POST', '/api/filter', filtering)
