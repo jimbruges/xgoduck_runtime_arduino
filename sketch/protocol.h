@@ -25,7 +25,10 @@ enum ServoOp : uint8_t {
   SERVO_GOTO = 4,
   SERVO_SET_PERM_KP_KD = 5,
   SERVO_READ = 6,
-  SERVO_PING = 7
+  SERVO_PING = 7,
+  SERVO_SET_MIDDLE = 8,
+  SERVO_READ_REG = 9,     // newId = register address; reply rawPos = 16-bit value
+  SERVO_WRITE_LIMIT = 10  // newId = ADDR_MIN_ANGLE, ADDR_MAX_ANGLE or ADDR_POS_OFFSET; rawPos = value
 };
 
 // Little endian, binary payload inside MessagePack RPC. ABI shared with wire.py.

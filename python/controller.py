@@ -17,6 +17,7 @@ FACTORY_ZERO = [
     2550, 2060, 2128, 2034, 2190,
 ]
 ZERO_PATH = Path(__file__).resolve().parents[1] / 'data' / 'zero_pos.json'
+CAL_ZERO = 2048  # Finish re-centres each servo so its zero reads this (CAL_ZERO_POS)
 EXCLUSIVE_MODES = ('calibrate', 'servo_debug')
 PICK_PERIOD_S = 4.0
 PICK_MOUTH_CLOSE_PHI = 0.4
@@ -79,7 +80,7 @@ class Controller:
         self.raw_pos = list(FACTORY_ZERO)
         self.zero_pos = list(FACTORY_ZERO)
         self.cal_done = [False]*15
-        self.cal_targets = [2047]*15
+        self.cal_targets = [None]*15
         self.raw_mask = 0
         self.servo_reply = None
         self.servo_reply_event = threading.Event()
@@ -211,7 +212,7 @@ class Controller:
                 self.bridge.notify('duck_servo', encode_servo(SERVO_EXIT, 10))
             if mode == 'calibrate':
                 self._disarm_now()
-                self.cal_targets = [2047]*15
+                self.cal_targets = [None]*15
                 self.cal_done = [False]*15
                 self.bridge.notify('duck_cal', encode_cal(CAL_ENTER))
             elif mode == 'servo_debug':
@@ -318,15 +319,22 @@ class Controller:
         return {'ok': True}
 
     def cal_targets_set(self, targets):
-        values = [int(v) for v in targets]
-        if len(values) != 15 or any(not 0 <= v <= 4095 for v in values):
-            raise ValueError('15 raw targets in 0..4095 required')
+        # null leaves a joint unpowered; the MCU energizes a joint on its first target.
+        targets = list(targets)
+        if len(targets) != 15:
+            raise ValueError('15 raw targets required')
+        values = [None if v is None else int(v) for v in targets]
+        if any(v is not None and not 0 <= v <= 4095 for v in values):
+            raise ValueError('raw targets must be in 0..4095')
+        mask = sum(1 << i for i, v in enumerate(values) if v is not None)
         with self.lock:
             if self.mode != 'calibrate':
                 raise ValueError('not in calibrate mode')
             self.cal_targets = values
             self.web_time = time.monotonic()
-            self.bridge.notify('duck_cal', encode_cal(CAL_SET_RAW, mask=ALL_MASK, raw=values))
+            if mask:
+                raw = [0 if v is None else v for v in values]
+                self.bridge.notify('duck_cal', encode_cal(CAL_SET_RAW, mask=mask, raw=raw))
         return {'ok': True, 'targets': values}
 
     def cal_finish(self, index):
@@ -336,9 +344,23 @@ class Controller:
         with self.lock:
             if self.mode != 'calibrate':
                 raise ValueError('not in calibrate mode')
+            # The MCU re-centres the servo's position offset so this pose reads CAL_ZERO.
             self.bridge.notify('duck_cal', encode_cal(CAL_FINISH_ONE, index=index))
-            # Optimistically store the last reported encoder reading.
-            self.zero_pos[index] = int(self.raw_pos[index])
+            self.web_time = time.monotonic()
+        # Confirm from fresh raw feedback before saving; the EEPROM write takes ~25 ms.
+        deadline = time.monotonic() + 0.8
+        time.sleep(0.08)
+        while True:
+            with self.lock:
+                raw = int(self.raw_pos[index])
+            if abs(raw - CAL_ZERO) <= 40:
+                break
+            if time.monotonic() > deadline:
+                raise ValueError(f'ID {MOTOR_IDS[index]} did not confirm the offset change '
+                                 f'(reads {raw}); its zero was not changed')
+            time.sleep(0.05)
+        with self.lock:
+            self.zero_pos[index] = CAL_ZERO
             self.cal_done[index] = True
             self._save_zeros()
             self.web_time = time.monotonic()
@@ -396,6 +418,25 @@ class Controller:
                 op, payload = SERVO_READ, encode_servo(SERVO_READ, target_id)
             elif action == 'ping':
                 op, payload = SERVO_PING, encode_servo(SERVO_PING, target_id)
+            elif action == 'read_reg':
+                # new_id carries the register address.
+                op, payload = SERVO_READ_REG, encode_servo(SERVO_READ_REG, target_id, new_id=int(new_id))
+            elif action == 'write_limit':
+                # new_id is the angle-limit register (9 or 11), raw_pos its value.
+                if int(new_id) not in (ADDR_MIN_ANGLE, ADDR_MAX_ANGLE):
+                    raise ValueError('only angle-limit registers 9 and 11 are writable')
+                op, payload = SERVO_WRITE_LIMIT, encode_servo(
+                    SERVO_WRITE_LIMIT, target_id, new_id=int(new_id), raw_pos=int(raw_pos))
+            elif action == 'write_offset':
+                # raw_pos is the 12-bit register value. These servos report
+                # (encoder - offset) mod 4096, so (encoder - 2048) % 4096 centres a joint.
+                value = int(raw_pos)
+                if not 0 <= value <= 4095:
+                    raise ValueError('offset register must be within 0..4095')
+                op, payload = SERVO_WRITE_LIMIT, encode_servo(
+                    SERVO_WRITE_LIMIT, target_id, new_id=ADDR_POS_OFFSET, raw_pos=value)
+            elif action == 'set_middle':
+                op, payload = SERVO_SET_MIDDLE, encode_servo(SERVO_SET_MIDDLE, target_id)
             elif action == 'torque_off':
                 op, payload = SERVO_ENTER, encode_servo(SERVO_ENTER, target_id)
             else:

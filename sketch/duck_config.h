@@ -13,6 +13,11 @@ static const float SERVO_SPEED_UNIT = 50.0f;
 static const uint16_t POS_MIN = 0;
 static const uint16_t POS_MAX = 4095;
 static const uint16_t CAL_CENTER_POS = 2047;
+// Finish re-centres a servo's position offset so its zero reads this, mid-range.
+static const uint16_t CAL_ZERO_POS = 2048;
+// Calibration moves at most this many encoder counts per 100 Hz tick (~35 deg/s).
+static const uint16_t CAL_STEP_PER_TICK = 4;
+static const uint16_t ALL_MOTORS_MASK = 0x7FFF;
 
 static const uint8_t ADDR_GOAL_POS = 0x2A;
 static const uint8_t ADDR_PRESENT = 0x38;
@@ -23,6 +28,11 @@ static const uint8_t ADDR_TEMP_KD = 51;
 static const uint8_t ADDR_PERM_KP_KD = 0x15;
 static const uint8_t ADDR_UNLOCK = 0x37;
 static const uint8_t ADDR_ID = 0x05;
+static const uint8_t ADDR_MIN_ANGLE = 9;   // EEPROM; min = max = 0 selects multi-turn mode
+static const uint8_t ADDR_MAX_ANGLE = 11;
+static const uint8_t ADDR_POS_OFFSET = 31;  // EEPROM; servo reports (encoder - offset) mod 4096
+// Writing this to ADDR_TORQUE makes the servo store an offset so its present position reads 2048.
+static const uint8_t TORQUE_SET_MIDDLE = 128;
 
 static const uint8_t TEMP_KP_RUN = 6;
 static const uint8_t TEMP_KD_RUN = 20;

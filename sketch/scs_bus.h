@@ -18,6 +18,9 @@ static bool servoPingSeen = false;
 static uint8_t servoReadId = 0xFF;
 static bool servoReadSeen = false;
 static uint16_t servoReadPos = 0;
+static uint8_t servoRegId = 0xFF;
+static bool servoRegSeen = false;
+static uint16_t servoRegValue = 0;
 
 static int motorIndexById(uint8_t id) {
   for (uint8_t i = 0; i < NUM_MOTORS; i++) {
@@ -103,21 +106,25 @@ static void setRunKpKd() {
   Serial1.flush();
 }
 
-static void syncWriteGoalsFromDesPos() {
-  uint8_t order[NUM_MOTORS * 7];
-  for (uint8_t i = 0; i < NUM_MOTORS; i++) {
-    motors[i].desPos = satPos(motors[i].desPos);
-    order[i * 7] = motors[i].id;
-    packWordLE(order + i * 7 + 1, motors[i].desPos);
-    packWordLE(order + i * 7 + 3, 0);
-    packWordLE(order + i * 7 + 5, 0);
-  }
+static void syncWriteGoalsMasked(uint16_t mask) {
   uint8_t sync[2 + NUM_MOTORS * 7];
+  uint8_t n = 0;
   sync[0] = ADDR_GOAL_POS;
   sync[1] = 6;
-  memcpy(sync + 2, order, NUM_MOTORS * 7);
-  scsWriteBuf(0xFE, 0x83, sync, (uint8_t)(NUM_MOTORS * 7 + 2));
+  for (uint8_t i = 0; i < NUM_MOTORS; i++) {
+    if (!(mask & (1u << i))) continue;
+    motors[i].desPos = satPos(motors[i].desPos);
+    uint8_t *o = sync + 2 + n * 7;
+    o[0] = motors[i].id;
+    packWordLE(o + 1, motors[i].desPos);
+    packWordLE(o + 3, 0);
+    packWordLE(o + 5, 0);
+    ++n;
+  }
+  if (n) scsWriteBuf(0xFE, 0x83, sync, (uint8_t)(n * 7 + 2));
 }
+
+static void syncWriteGoalsFromDesPos() { syncWriteGoalsMasked(ALL_MOTORS_MASK); }
 
 static void sendMotorDesPos() {
   for (uint8_t i = 0; i < NUM_MOTORS; i++) {
@@ -128,8 +135,8 @@ static void sendMotorDesPos() {
   syncWriteGoalsFromDesPos();
 }
 
-static void sendMotorRawPos() {
-  syncWriteGoalsFromDesPos();
+static void sendMotorRawPos(uint16_t mask) {
+  syncWriteGoalsMasked(mask);
 }
 
 static void writeSingleGoalRaw(uint8_t id, uint16_t raw) {
@@ -149,6 +156,28 @@ static void servoUnlock(uint8_t id) {
 static void servoSetId(uint8_t id, uint8_t newId) {
   scsWriteByte(id, ADDR_ID, newId);
   Serial1.flush();
+}
+
+static void servoSetMiddle(uint8_t id) {
+  servoUnlock(id);
+  k_msleep(2);
+  scsWriteByte(id, ADDR_TORQUE, TORQUE_SET_MIDDLE);
+  Serial1.flush();
+  k_msleep(20);  // EEPROM write
+  scsWriteByte(id, ADDR_UNLOCK, 1);
+  Serial1.flush();
+  k_msleep(2);
+}
+
+static void servoWriteLimit(uint8_t id, uint8_t addr, uint16_t value) {
+  servoUnlock(id);
+  k_msleep(2);
+  scsWriteWord(id, addr, value);
+  Serial1.flush();
+  k_msleep(20);  // EEPROM write
+  scsWriteByte(id, ADDR_UNLOCK, 1);
+  Serial1.flush();
+  k_msleep(2);
 }
 
 static void servoSetPermKpKd(uint8_t id, uint8_t kp, uint8_t kd) {
@@ -265,6 +294,11 @@ static void parseServoRx() {
           if (dataLen == 2 && servoPingId <= 253 && sid == servoPingId) {
             // Even a device error is evidence that this address responded.
             servoPingSeen = true;
+            break;
+          }
+          if (dataLen == 4 && servoRxBuffer[4] == 0 && servoRegId <= 253 && sid == servoRegId) {
+            servoRegSeen = true;
+            servoRegValue = (uint16_t)servoRxBuffer[5] | ((uint16_t)servoRxBuffer[6] << 8);
             break;
           }
           const int idx = motorIndexById(sid);

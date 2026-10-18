@@ -9,19 +9,37 @@
     <button class="stop" id="exit">Exit</button>
   </div>
 </header>
-<p id="message">After the robot is wired, start calibration. Temporary gains become KP = 3 and KD = 0, and every servo is commanded to 2047.</p>
+<p id="message">After the robot is wired, start calibration. Torque stays off until you move a joint's slider; that joint then powers up at KP = 3, KD = 0 and moves slowly to the slider.</p>
 <section>
   <h2>Procedure</h2>
   <div class="buttons">
     <button id="start">Start calibration</button>
     <button id="exit2">Exit</button>
+    <button id="all-zero">Move all to zero</button>
   </div>
-  <p class="hint">Policy and pose control stop while this page is active. Drag a slider to move one joint (raw encoder 0–4095). Place the joint at its mechanical zero, then press Finish. The current encoder reading is stored as that joint's zero. A green row means Finish was pressed during this session. Leaving or restarting clears that highlight. It is not written into the saved zero by itself.</p>
+  <p class="warn"><strong>Move all to zero only after calibrating.</strong> It powers every responding joint, one at a time, and moves each slowly to its saved zero, then holds it there at KP = 3 so you can fine-tune with the sliders and press Finish again. A joint that has not been calibrated moves to an old or factory zero and may bind. Support the robot first.</p>
+  <p class="hint">Policy and pose control stop while this page is active. Each slider follows its joint's encoder until you drag it. Dragging powers that one joint and moves it at about 35°/s (raw encoder 0–4095). Place the joint at its mechanical zero, then press Finish. Finish shifts that servo's stored position offset so this pose reads 2048 and saves 2048 as its zero, leaving about ±180° before the encoder wraps. A joint reading outside 0–4095 can still be finished. A green row means Finish was pressed during this session. Leaving or restarting clears that highlight. It is not written into the saved zero by itself.</p>
 </section>
+<div class="cal-layout">
 <section>
   <h2>Joints <span id="mode">—</span></h2>
   <div id="joints" class="cal-list"></div>
 </section>
+<section class="cal-guide" aria-live="polite">
+  <h2>Zero pose <span id="guide-id">—</span></h2>
+  <figure class="cal-guide-fig"><img id="guide-img" alt=""><figcaption id="guide-view"></figcaption></figure>
+  <h3 id="guide-name">—</h3>
+  <p id="guide-text"></p>
+  <p class="cal-legend"><span class="sw sw-teal"></span>moves with this joint <span class="sw sw-ref"></span>0° line</p>
+  <div class="cal-guide-ctl">
+    <div class="cal-guide-read"><span id="guide-raw">encoder —</span><span id="guide-val">off</span></div>
+    <input id="guide-sl" type="range" min="0" max="4095" value="2047" aria-label="Selected joint target">
+    <div class="buttons"><button id="guide-prev">←</button><button id="guide-finish">Finish</button><button id="guide-next">→</button></div>
+  </div>
+  <p class="hint">Renders of the XGO-Duck CAD assembly at model 0° (Microduck model, all joints zero). This is not the Default pose, which bends the hips, ankles and neck away from it.</p>
+</section>
+</div>
 </main>
+<script src="calguide.js"></script>
 <script src="calibrate.js"></script>
 </html>

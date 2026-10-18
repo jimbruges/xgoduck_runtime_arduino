@@ -30,6 +30,9 @@ static bool servoPending = false;
 static ServoReplyPacket servoReply = {};
 static bool servoReplyReady = false;
 static bool rawNotifyEveryTick = false;
+// Calibration energizes a joint only after the host first sends it a target.
+static uint16_t calGoalMask = 0, calActiveMask = 0;
+static uint16_t calGoal[NUM_MOTORS] = {};
 
 static void receiveCommand(MsgPack::bin_t<uint8_t> bytes) {
   CommandPacket cmd;
@@ -75,10 +78,13 @@ static void receiveServo(MsgPack::bin_t<uint8_t> bytes) {
   bool valid = bytes.size() == sizeof(pkt);
   if (valid) {
     memcpy(&pkt, bytes.data(), sizeof(pkt));
-    valid = memcmp(pkt.magic, "DQV1", 4) == 0 && pkt.op <= SERVO_PING &&
+    valid = memcmp(pkt.magic, "DQV1", 4) == 0 && pkt.op <= SERVO_WRITE_LIMIT &&
             pkt.targetId <= 253;
     if (pkt.op == SERVO_GOTO) valid = valid && pkt.rawPos <= POS_MAX;
     if (pkt.op == SERVO_SET_ID) valid = valid && pkt.newId <= 253;
+    if (pkt.op == SERVO_WRITE_LIMIT)
+      valid = valid && (pkt.newId == ADDR_MIN_ANGLE || pkt.newId == ADDR_MAX_ANGLE ||
+                        pkt.newId == ADDR_POS_OFFSET);
   }
   k_mutex_lock(&hostMu, K_FOREVER);
   if (valid) { pendingServo = pkt; servoPending = true; }
@@ -99,40 +105,34 @@ static void fillRawPacket(RawPacket &r) {
   k_mutex_unlock(&motorsMu);
 }
 
+static void calFinishOne(unsigned i);
+
 static void applyCalOp(const CalPacket &pkt) {
   switch (pkt.op) {
     case CAL_ENTER:
       hostMode = HOST_CAL;
       rawNotifyEveryTick = true;
-      k_mutex_lock(&motorsMu, K_FOREVER);
-      for (unsigned i = 0; i < NUM_MOTORS; ++i) motors[i].desPos = CAL_CENTER_POS;
-      k_mutex_unlock(&motorsMu);
+      setTorqueEnable(false);
       setTempKpKd(TEMP_KP_CAL, TEMP_KD_CAL);
-      setTorqueEnable(true);
-      k_mutex_lock(&motorsMu, K_FOREVER);
-      sendMotorRawPos();
-      k_mutex_unlock(&motorsMu);
-      Serial1.flush();
+      calGoalMask = calActiveMask = 0;
       break;
     case CAL_EXIT:
       hostMode = HOST_NORMAL;
       rawNotifyEveryTick = false;
+      calGoalMask = calActiveMask = 0;
       setTorqueEnable(false);
       setRunKpKd();
       break;
     case CAL_SET_RAW:
       if (hostMode != HOST_CAL) break;
-      k_mutex_lock(&motorsMu, K_FOREVER);
       for (unsigned i = 0; i < NUM_MOTORS; ++i) {
-        if (pkt.mask & (1u << i)) motors[i].desPos = satPos(pkt.raw[i]);
+        if (pkt.mask & (1u << i)) calGoal[i] = satPos(pkt.raw[i]);
       }
-      k_mutex_unlock(&motorsMu);
+      calGoalMask |= pkt.mask & ALL_MOTORS_MASK;
       break;
     case CAL_FINISH_ONE:
       if (hostMode != HOST_CAL || pkt.index >= NUM_MOTORS) break;
-      k_mutex_lock(&motorsMu, K_FOREVER);
-      motors[pkt.index].zeroPos = motors[pkt.index].fbPos;
-      k_mutex_unlock(&motorsMu);
+      calFinishOne(pkt.index);
       break;
     case CAL_SET_ZEROS:
       k_mutex_lock(&motorsMu, K_FOREVER);
@@ -141,6 +141,81 @@ static void applyCalOp(const CalPacket &pkt) {
       }
       k_mutex_unlock(&motorsMu);
       break;
+  }
+}
+
+static void readOneForReply(uint8_t id, ServoReplyPacket &reply) {
+  drainServoRx();
+  servoReadId = id;
+  servoReadSeen = false;
+  servoReadPos = 0;
+  readSinglePresent(id);
+  Serial1.flush();
+  const uint32_t start = micros();
+  while ((uint32_t)(micros() - start) < SERVO_REPLY_US) {
+    parseServoRx();
+    k_sleep(K_USEC(100));
+  }
+  parseServoRx();
+  const int idx = motorIndexById(id);
+  reply.ok = servoReadSeen ? 1 : 0;
+  reply.rawPos = servoReadPos;
+  servoReadId = 0xFF;
+  if (idx >= 0) {
+    k_mutex_lock(&motorsMu, K_FOREVER);
+    reply.zeroPos = motors[idx].zeroPos;
+    k_mutex_unlock(&motorsMu);
+  }
+}
+
+static void readRegForReply(uint8_t id, uint8_t addr, ServoReplyPacket &reply) {
+  drainServoRx();
+  servoRegId = id;
+  servoRegSeen = false;
+  servoRegValue = 0;
+  const uint8_t data[2] = {addr, 2};
+  scsWriteBuf(id, 0x02, data, 2);
+  Serial1.flush();
+  const uint32_t start = micros();
+  while ((uint32_t)(micros() - start) < SERVO_REPLY_US) {
+    parseServoRx();
+    k_sleep(K_USEC(100));
+  }
+  parseServoRx();
+  reply.ok = servoRegSeen ? 1 : 0;
+  reply.rawPos = servoRegValue;
+  servoRegId = 0xFF;
+}
+
+// Store the joint's present position as its zero by shifting the servo's position
+// offset so it reads CAL_ZERO_POS there. Zero then sits mid-range, ±180° from the
+// encoder wrap. These servos report (encoder - offset) mod 4096.
+static void calFinishOne(unsigned i) {
+  const uint8_t id = motors[i].id;
+  ServoReplyPacket off = {};
+  readRegForReply(id, ADDR_POS_OFFSET, off);
+  if (!off.ok) return;  // zero unchanged; the host sees no re-centred reading
+  k_mutex_lock(&motorsMu, K_FOREVER);
+  const uint16_t raw = motors[i].fbPos;
+  k_mutex_unlock(&motorsMu);
+  // Bit 15 marks a reading below 0 (sign-magnitude).
+  const int32_t present = (raw & 0x8000u) ? -(int32_t)(raw & 0x7FFFu) : (int32_t)raw;
+  const uint16_t newOffset = (uint16_t)(((int32_t)off.rawPos + present - CAL_ZERO_POS) & 0x0FFF);
+  const bool held = calActiveMask & (1u << i);
+  // Release the joint while its frame changes so its old goal cannot drive it.
+  scsWriteByte(id, ADDR_TORQUE, 0);
+  Serial1.flush();
+  servoWriteLimit(id, ADDR_POS_OFFSET, newOffset);
+  k_mutex_lock(&motorsMu, K_FOREVER);
+  motors[i].zeroPos = CAL_ZERO_POS;
+  motors[i].fbPos = CAL_ZERO_POS;
+  motors[i].desPos = CAL_ZERO_POS;
+  k_mutex_unlock(&motorsMu);
+  calGoal[i] = CAL_ZERO_POS;
+  if (held) {
+    writeSingleGoalRaw(id, CAL_ZERO_POS);
+    scsWriteByte(id, ADDR_TORQUE, 1);
+    Serial1.flush();
   }
 }
 
@@ -204,33 +279,26 @@ static void applyServoOp(const ServoPacket &pkt) {
       servoPingId = 0xFF;
       break;
     }
+    case SERVO_SET_MIDDLE:
+      if (hostMode != HOST_SERVO_DEBUG) { reply.ok = 0; break; }
+      // Torque off on every servo first so the offset change cannot move anything.
+      setTorqueEnable(false);
+      servoSetMiddle(pkt.targetId);
+      readOneForReply(pkt.targetId, reply);
+      break;
+    case SERVO_READ_REG:
+      if (hostMode != HOST_SERVO_DEBUG) { reply.ok = 0; break; }
+      readRegForReply(pkt.targetId, pkt.newId, reply);
+      break;
+    case SERVO_WRITE_LIMIT:
+      if (hostMode != HOST_SERVO_DEBUG) { reply.ok = 0; break; }
+      setTorqueEnable(false);
+      servoWriteLimit(pkt.targetId, pkt.newId, pkt.rawPos);
+      readRegForReply(pkt.targetId, pkt.newId, reply);
+      break;
     case SERVO_READ:
       if (hostMode != HOST_SERVO_DEBUG) { reply.ok = 0; break; }
-      drainServoRx();
-      servoReadId = pkt.targetId;
-      servoReadSeen = false;
-      servoReadPos = 0;
-      readSinglePresent(pkt.targetId);
-      Serial1.flush();
-      {
-        const uint32_t start = micros();
-        while ((uint32_t)(micros() - start) < SERVO_REPLY_US) {
-          parseServoRx();
-          k_sleep(K_USEC(100));
-        }
-        parseServoRx();
-      }
-      {
-        const int idx = motorIndexById(pkt.targetId);
-        reply.ok = servoReadSeen ? 1 : 0;
-        reply.rawPos = servoReadPos;
-        servoReadId = 0xFF;
-        if (idx >= 0) {
-          k_mutex_lock(&motorsMu, K_FOREVER);
-          reply.zeroPos = motors[idx].zeroPos;
-          k_mutex_unlock(&motorsMu);
-        }
-      }
+      readOneForReply(pkt.targetId, reply);
       break;
   }
   k_mutex_lock(&hostMu, K_FOREVER);
@@ -303,7 +371,28 @@ static void controlTask(void*, void*, void*) {
     }
     static bool previousEnabled = false;
     if (hostMode == HOST_CAL) {
-      k_mutex_lock(&motorsMu, K_FOREVER); sendMotorRawPos(); k_mutex_unlock(&motorsMu);
+      k_mutex_lock(&motorsMu, K_FOREVER);
+      // Energize at most one new joint per tick, starting at its present position,
+      // so the bus never sees a simultaneous inrush from every servo.
+      const uint16_t waiting = calGoalMask & ~calActiveMask & servoRxMask;
+      for (unsigned i = 0; i < NUM_MOTORS; ++i) {
+        // A reading past the encoder range would be clamped and the joint would jump.
+        if (!(waiting & (1u << i)) || motors[i].fbPos > POS_MAX) continue;
+        motors[i].desPos = motors[i].fbPos;
+        writeSingleGoalRaw(motors[i].id, motors[i].desPos);
+        scsWriteByte(motors[i].id, ADDR_TORQUE, 1);
+        calActiveMask |= 1u << i;
+        break;
+      }
+      for (unsigned i = 0; i < NUM_MOTORS; ++i) {
+        if (!(calActiveMask & (1u << i))) continue;
+        const int32_t d = (int32_t)calGoal[i] - (int32_t)motors[i].desPos;
+        const int32_t step = d > CAL_STEP_PER_TICK ? CAL_STEP_PER_TICK :
+                             d < -(int32_t)CAL_STEP_PER_TICK ? -(int32_t)CAL_STEP_PER_TICK : d;
+        motors[i].desPos = satPos((int32_t)motors[i].desPos + step);
+      }
+      sendMotorRawPos(calActiveMask);
+      k_mutex_unlock(&motorsMu);
       Serial1.flush();
     } else if (enabled) {
       k_mutex_lock(&motorsMu, K_FOREVER); sendMotorDesPos(); k_mutex_unlock(&motorsMu);

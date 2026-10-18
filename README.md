@@ -1,5 +1,7 @@
 # XGO Duck
 
+> **Fork:** this fork adds safer, repeatable zero calibration and servo register tools. See [FORK.md](FORK.md) for what differs from [LuwuDynamics/xgoduck_runtime_arduino](https://github.com/LuwuDynamics/xgoduck_runtime_arduino).
+
 This project runs walking, get-up, pick, and roulade policies on an XGODuck built around the Arduino Uno Q.
 
 It is based on [Microduck](https://github.com/pollen-robotics/microduck) by [Pollen Robotics](https://pollen-robotics.com/microduck/).
@@ -70,8 +72,10 @@ After power-up the controller also writes the temporary torque register (address
 
 Do this after the harness is wired and every ID answers.
 
-1. Open **Calibration** (`/calibrate.html`) and start it. Policy and pose control stop. Temporary gains become KP = 3 and KD = 0, and every servo is commanded to 2047.
-2. For each joint, set the slider so the link sits at its mechanical zero, then press **Finish**. The current encoder reading becomes that joint's zero and is saved to `data/zero_pos.json`.
+If a joint's mechanical zero sits at the encoder wrap (it reads near 0 or 4095, or outside 0–4095), its servo's stored position offset, register 31, must be shifted so the joint reads 2048 at zero. Calibration's **Finish** does this automatically. To do it by hand, in Servo setup mode post `{"action": "write_offset", "target_id": ID, "raw_pos": OFFSET}` to `/api/servo`, with `OFFSET = (encoder + current offset - 2048) mod 4096`. The servo reports `(encoder - offset) mod 4096`, so read the joint back to check it shows 2048. Torque stays off and nothing moves; writing 0 undoes it. Then calibrate that joint. The `set_middle` action (writing 128 to address 40, the STS midpoint command) did not change the reading on these servos.
+
+1. Open **Calibration** (`/calibrate.html`) and start it. Policy and pose control stop and torque is off. Each slider tracks its joint's encoder. Dragging a slider powers that one joint at KP = 3, KD = 0, starting from its present position, and the MCU moves it toward the slider at most 4 counts per tick (about 35°/s). At most one joint is energized per tick, so the servos never all start at once.
+2. For each joint, set the slider so the link sits at its mechanical zero, then press **Finish**. Click a row to open it in the **Zero pose** panel: a render of the CAD assembly with the part moved by that joint in teal and an orange 0° reference line, plus that joint's encoder reading, slider and **Finish** button, so you can calibrate without scrolling. The renders are in `assets/cal/`. Zero is the pose of the XGO-Duck CAD assembly, the Microduck model with every joint at 0°: legs straight and vertical, feet flat and pointing forward, neck vertical, head level and facing forward, beak closed. It is not the Default pose. **Finish** moves the panel on to the next joint. **Finish** shifts that servo's stored position offset (register 31) so the present pose reads 2048, then saves 2048 as the joint's zero in `data/zero_pos.json`. Every joint therefore ends up mid-range, about ±180° from the encoder wrap, however its horn was fitted. The offset is written with that joint's torque off, and a joint being held is re-held at 2048. A joint reading outside 0–4095 can still be finished. If the servo does not confirm the change, Finish reports an error and leaves the zero unchanged.
 3. Exit calibration. The highlight on a finished row is only for this visit; the saved zero is the encoder value.
 
 ## Running

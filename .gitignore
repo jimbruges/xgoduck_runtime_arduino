@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 data/zero_pos.json
 tests/
+# local robot backups
+checkpoints/
