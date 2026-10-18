@@ -70,13 +70,110 @@ After power-up the controller also writes the temporary torque register (address
 
 ## Calibration
 
-Do this after the harness is wired and every ID answers.
+Calibration records each joint's **zero**: the encoder reading when that joint is at the model's 0°. The policies, Default pose and walking all measure joint angles from these zeros, so a wrong zero shows up as a robot that leans, binds or will not stand.
 
-If a joint's mechanical zero sits at the encoder wrap (it reads near 0 or 4095, or outside 0–4095), its servo's stored position offset, register 31, must be shifted so the joint reads 2048 at zero. Calibration's **Finish** does this automatically. To do it by hand, in Servo setup mode post `{"action": "write_offset", "target_id": ID, "raw_pos": OFFSET}` to `/api/servo`, with `OFFSET = (encoder + current offset - 2048) mod 4096`. The servo reports `(encoder - offset) mod 4096`, so read the joint back to check it shows 2048. Torque stays off and nothing moves; writing 0 undoes it. Then calibrate that joint. The `set_middle` action (writing 128 to address 40, the STS midpoint command) did not change the reading on these servos.
+Zero is the pose of the XGO-Duck CAD assembly, which is Microduck's model with every joint at 0°:
 
-1. Open **Calibration** (`/calibrate.html`) and start it. Policy and pose control stop and torque is off. Each slider tracks its joint's encoder. Dragging a slider powers that one joint at KP = 3, KD = 0, starting from its present position, and the MCU moves it toward the slider at most 4 counts per tick (about 35°/s). At most one joint is energized per tick, so the servos never all start at once.
-2. For each joint, set the slider so the link sits at its mechanical zero, then press **Finish**. Click a row to open it in the **Zero pose** panel: a render of the CAD assembly with the part moved by that joint in teal and an orange 0° reference line, plus that joint's encoder reading, slider and **Finish** button, so you can calibrate without scrolling. The renders are in `assets/cal/`. Zero is the pose of the XGO-Duck CAD assembly, the Microduck model with every joint at 0°: legs straight and vertical, feet flat and pointing forward, neck vertical, head level and facing forward, beak closed. It is not the Default pose. **Finish** moves the panel on to the next joint. **Finish** shifts that servo's stored position offset (register 31) so the present pose reads 2048, then saves 2048 as the joint's zero in `data/zero_pos.json`. Every joint therefore ends up mid-range, about ±180° from the encoder wrap, however its horn was fitted. The offset is written with that joint's torque off, and a joint being held is re-held at 2048. A joint reading outside 0–4095 can still be finished. If the servo does not confirm the change, Finish reports an error and leaves the zero unchanged.
-3. Exit calibration. The highlight on a finished row is only for this visit; the saved zero is the encoder value.
+- legs straight and vertical,
+- feet flat and pointing straight forward,
+- neck vertical,
+- head level and facing forward,
+- beak closed.
+
+This is **not** the Default pose. Default pose bends the hips, ankles and neck away from zero.
+
+### Before you start
+
+- The harness is wired and all 15 IDs answer. Servo setup's **Scan all IDs** should find 10–14, 20–24 and 30–34.
+- The 8.4 V pack is charged and the servo supply is on.
+- The robot is held or supported so that a released joint cannot let it fall.
+
+### Zero pose for each joint
+
+The calibration page shows these renders of the CAD assembly in its **Zero pose** panel. In each one the part moved by that joint is **teal**, and an **orange bar**, modelled into the CAD at the joint's axis, marks its 0° line. Line the real part up with the orange bar.
+
+**Left leg (IDs 10–14)**
+
+<table>
+<tr>
+<td align="center"><img src="assets/cal/j10.png" width="170" alt="Left hip yaw at zero, bottom view"><br><b>10 · hip yaw</b><br>Bottom view, front to the right. Foot points straight forward, parallel to the line.</td>
+<td align="center"><img src="assets/cal/j11.png" width="170" alt="Left hip roll at zero, front view"><br><b>11 · hip roll</b><br>Front view. Leg hangs straight down, not splayed out or tucked in.</td>
+<td align="center"><img src="assets/cal/j12.png" width="170" alt="Left hip pitch at zero, side view"><br><b>12 · hip pitch</b><br>Left side view. Thigh vertical, not swung forward or back.</td>
+</tr>
+<tr>
+<td align="center"><img src="assets/cal/j13.png" width="170" alt="Left knee at zero, side view"><br><b>13 · knee</b><br>Left side view. Knee straight; shank in line with the thigh.</td>
+<td align="center"><img src="assets/cal/j14.png" width="170" alt="Left ankle at zero, side view"><br><b>14 · ankle</b><br>Left side view. Sole flat along the horizontal line, square to the shank.</td>
+<td></td>
+</tr>
+</table>
+
+**Right leg (IDs 20–24)**
+
+<table>
+<tr>
+<td align="center"><img src="assets/cal/j20.png" width="170" alt="Right hip yaw at zero, bottom view"><br><b>20 · hip yaw</b><br>Bottom view, front to the right. Foot points straight forward.</td>
+<td align="center"><img src="assets/cal/j21.png" width="170" alt="Right hip roll at zero, front view"><br><b>21 · hip roll</b><br>Front view. Leg hangs straight down.</td>
+<td align="center"><img src="assets/cal/j22.png" width="170" alt="Right hip pitch at zero, side view"><br><b>22 · hip pitch</b><br>Right side view. Thigh vertical.</td>
+</tr>
+<tr>
+<td align="center"><img src="assets/cal/j23.png" width="170" alt="Right knee at zero, side view"><br><b>23 · knee</b><br>Right side view. Knee straight.</td>
+<td align="center"><img src="assets/cal/j24.png" width="170" alt="Right ankle at zero, side view"><br><b>24 · ankle</b><br>Right side view. Sole flat, square to the shank.</td>
+<td></td>
+</tr>
+</table>
+
+**Neck, head and mouth (IDs 30–34)**
+
+<table>
+<tr>
+<td align="center"><img src="assets/cal/j30.png" width="170" alt="Neck pitch at zero, side view"><br><b>30 · neck pitch</b><br>Side view. Neck vertical; both neck pivots on the line.</td>
+<td align="center"><img src="assets/cal/j31.png" width="170" alt="Head pitch at zero, side view"><br><b>31 · head pitch</b><br>Side view. With the neck vertical, the head's underside is level.</td>
+<td align="center"><img src="assets/cal/j32.png" width="170" alt="Head yaw at zero, top view"><br><b>32 · head yaw</b><br>Top view, front to the right. Head faces straight forward.</td>
+</tr>
+<tr>
+<td align="center"><img src="assets/cal/j33.png" width="170" alt="Head roll at zero, front view"><br><b>33 · head roll</b><br>Front view. Head level side to side.</td>
+<td align="center"><img src="assets/cal/j34.png" width="170" alt="Mouth at zero, side view"><br><b>34 · mouth</b><br>Side view. Beak fully closed. The jaw is not a separate CAD part, so the whole head is teal; the line marks the beak seam.</td>
+<td></td>
+</tr>
+</table>
+
+### Step by step
+
+1. **Open Calibration** (`/calibrate.html`) and press **Start calibration**. Policy and pose control stop. Torque stays **off**, so nothing moves yet, and each slider follows its joint's encoder.
+2. **Select a joint.** Click its row, or use **←** and **→** in the **Zero pose** panel. The panel shows that joint's render and instruction, its encoder reading, its slider and its **Finish** button, so you do not need to scroll.
+3. **Put the joint at zero**, matching the orange line in the render. Either:
+   - move it by hand while it is unpowered, or
+   - drag its slider. This powers **only that joint**, gently (KP = 3, KD = 0), starting from where it is. The MCU moves it toward the slider at about 35°/s and powers at most one new joint every 10 ms, so the servos never all start at once.
+4. **Press Finish.** The servo's stored position offset is shifted so this pose reads **2048**, and 2048 is saved as the joint's zero (see [What Finish does](#what-finish-does)). A powered joint stays where it is. The row turns green and the panel moves on to the next joint.
+5. **Repeat for all 15 joints.** Finishing a joint again replaces its zero with its current pose, so only press Finish when the joint is actually at zero.
+6. **Fine-tune (optional, after every joint is calibrated).** Press **Move all to zero**. Every responding joint is powered in turn, moved slowly to its saved zero and held there at KP = 3. Check the whole robot against the renders, nudge any joint with its slider, and press **Finish** on it again. Joints that are missing or out of range are skipped and listed.
+7. **Exit.** Torque turns off. Then, with the robot supported, test **Default pose** from the Control page before trying to walk.
+
+A green row only marks joints finished during this visit. The saved zeros are in `data/zero_pos.json`, which is local to the robot and gitignored. After a full calibration every entry is 2048.
+
+### What Finish does
+
+Each servo reports its position as `(encoder - offset) mod 4096`, where the offset is stored in the servo (register 31). The horn can be fitted with a joint's zero anywhere on the encoder, including right at the wrap between 4095 and 0. A zero there leaves almost no room in one direction: the joint either cannot reach its target, or crosses the wrap and jumps.
+
+So **Finish**, on the MCU:
+
+1. reads the servo's current offset,
+2. switches that joint's torque off and writes a new offset so the present pose reads 2048,
+3. re-holds the joint at 2048 if it was powered, so it does not move.
+
+The host then waits for the joint to report about 2048 before saving that as its zero. If the servo does not confirm within 0.8 s, Finish shows an error and the zero is left unchanged. Every calibrated joint therefore sits mid-range, about ±180° from the wrap, however its horn was fitted.
+
+To shift an offset by hand instead, enter Servo setup and post `{"action": "write_offset", "target_id": ID, "raw_pos": OFFSET}` to `/api/servo`, with `OFFSET = (reading + current offset - 2048) mod 4096`. `read_reg` with `new_id: 31` returns the current offset. Writing 0 removes the offset. The `set_middle` action (writing 128 to address 40, the STS midpoint command) did not change the reading on the HD-1910 servos tested.
+
+### Troubleshooting
+
+| Symptom | What to do |
+| --- | --- |
+| A row shows **encoder … out of range** and its slider is locked | The joint is past the encoder wrap. Move it to zero by hand and press **Finish**; that re-centres it. |
+| **Finish** reports that the joint *did not confirm the offset change* | The servo did not answer. Check its cable and the servo supply. The zero was not changed. |
+| Encoder readings show **—** or rows stop updating | No servo replies. Check the battery, the servo supply and the cables; a loose head cable drops IDs 30–34. If the page shows no readings at all after an app update, the MCU may not have started: fully power-cycle the Uno Q. |
+| The shield resets or the battery cuts out | Do not power many joints at once. Calibration only powers the joints you drag, one at a time. Recharge the pack if it has been cutting out. |
+| Default pose does not stand | Check each joint against the renders with **Move all to zero**, and re-finish any that are off. |
 
 ## Running
 
@@ -149,10 +246,13 @@ Position control stops if commands are absent for 250 ms or the IMU is absent fo
 ```text
 app.yaml                 App Lab manifest
 assets/                  Web UI
+assets/cal/              CAD zero-pose renders for calibration (j<ID>.png)
+assets/calguide.js       Zero-pose text and image per joint
 python/                  Host policy, Bridge client, ONNX models
 sketch/                  STM32 firmware
 data/zero_pos.json       Created on the robot by calibration (not in git)
 tools/                   Bridge patch, router rate, ELF check, read-only capture
+FORK.md                  What this fork changes from upstream
 ```
 
 ## Checks
