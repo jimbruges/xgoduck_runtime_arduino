@@ -21,7 +21,8 @@ static const uint16_t ALL_MOTORS_MASK = 0x7FFF;
 
 static const uint8_t ADDR_GOAL_POS = 0x2A;
 static const uint8_t ADDR_PRESENT = 0x38;
-static const uint8_t PRESENT_LEN = 6;
+// Present position, speed, load (2 bytes each), then voltage (0.1 V) and temperature (°C).
+static const uint8_t PRESENT_LEN = 8;
 static const uint8_t ADDR_TORQUE = 40;
 static const uint8_t ADDR_TEMP_KP = 50;
 static const uint8_t ADDR_TEMP_KD = 51;
@@ -71,6 +72,8 @@ struct Motor {
   uint16_t desPos;
   float fbAngleDeg;
   float fbVelDeg;
+  uint8_t fbVolt;  // 0.1 V
+  uint8_t fbTemp;  // °C
 };
 
 extern Motor motors[NUM_MOTORS];

@@ -95,12 +95,14 @@ static void receiveServo(MsgPack::bin_t<uint8_t> bytes) {
 }
 
 static void fillRawPacket(RawPacket &r) {
-  memcpy(r.magic, "DQR1", 4);
+  memcpy(r.magic, "DQR2", 4);
   r.mask = servoRxMask;
   k_mutex_lock(&motorsMu, K_FOREVER);
   for (unsigned i = 0; i < NUM_MOTORS; ++i) {
     r.pos[i] = motors[i].fbPos;
     r.zero[i] = motors[i].zeroPos;
+    r.volt[i] = motors[i].fbVolt;
+    r.temp[i] = motors[i].fbTemp;
   }
   k_mutex_unlock(&motorsMu);
 }

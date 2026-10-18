@@ -71,6 +71,15 @@ A Bluetooth gamepad can drive the robot, configured from a new **Controller** pa
 
 Upstream, the four head channels only feed the walk policy, so in Default pose they did nothing. Now in Default pose they drive the neck and head joints (IDs 30–33) directly: ±1 gives ±30°, ±35°, ±60° and ±20°, slewed at 100°/s. Walking is unchanged. The Control page labels them by joint.
 
+## Walk tuning and battery readout
+
+A **Walk tuning** section on the Control page, saved in `data/tuning.json`:
+
+- **Home pose: Table or Model.** Upstream uses one hand-tuned home (hip/ankle 23°) for every policy. The models' own `default_joint_pos` metadata says walk, get-up and pick were trained around 20° and roulade around 24°. **Model** uses each policy's trained home for observations and actions. Default: Table (upstream behaviour).
+- **Command smoothing:** an optional low-pass on walk and head commands.
+- **IMU level:** measures and cancels the IMU's mounting roll and pitch while the robot stands level. It replaces the hard-coded `IMU_BIAS_DEG`, which was zero.
+- **Battery and temperature:** the MCU's per-tick servo status read is extended from 6 to 8 bytes (adding voltage and temperature, registers 62–63). They travel in the raw packet (`DQR2`, 96 bytes), and the page shows the lowest servo voltage and the hottest servo.
+
 ## Notes from bring-up
 
 These are observations from one robot, not guarantees:

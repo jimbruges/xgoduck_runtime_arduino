@@ -29,6 +29,10 @@ class Policy:
         self.session = None
         self.in_name = self.file = ''
         self.home_rad = HOME_RAD.copy()
+        # Home the model was trained around (ONNX default_joint_pos, policy order, degrees).
+        # use_model_home picks it over the hand-tuned HOME_DEG table for obs and actions.
+        self.model_home_deg = None
+        self.use_model_home = False
         self._obs = np.empty(OBS_DIM, dtype=np.float32)
         self.reset_action_filter()
 
@@ -51,6 +55,11 @@ class Policy:
                 raise ValueError(f'expected observation shape [1,61], got {inp.shape}')
             if len(out.shape) != 2 or out.shape[-1] != ACTION_DIM:
                 raise ValueError(f'expected action shape [1,14], got {out.shape}')
+            meta = sess.get_modelmeta().custom_metadata_map
+            names = meta.get('joint_names', '').split(',')
+            home = [float(v) for v in meta.get('default_joint_pos', '').split(',') if v]
+            if len(home) == ACTION_DIM and len(names) == ACTION_DIM:
+                self.model_home_deg = np.rad2deg(np.asarray(home, dtype=np.float32))
             self.session, self.in_name = sess, inp.name
             self._outputs = [out.name]
             self.file = p.name
@@ -80,7 +89,7 @@ class Policy:
                    list(grav), list(gyro_rad))
         twist = np.zeros(3, dtype=np.float32) if cmd is None else cmd
         head_cmd = np.zeros(4, dtype=np.float32) if head is None else head
-        obs = make_obs(st, self.prev_action, twist, head_cmd, out=self._obs)
+        obs = make_obs(st, self.prev_action, twist, head_cmd, out=self._obs, home_deg=self.home_deg)
         if not np.isfinite(obs).all():
             raise ValueError('observation contains NaN or Inf')
         return obs
@@ -114,5 +123,11 @@ class Policy:
         self.prev_action = np.zeros(ACTION_DIM, dtype=np.float32)
         self._act_filt = np.zeros(ACTION_DIM, dtype=np.float32)
 
+    @property
+    def home_deg(self):
+        if self.use_model_home and self.model_home_deg is not None:
+            return self.model_home_deg
+        return HOME_DEG
+
     def action_to_deg(self, action):
-        return deg_from_action(np.asarray(action, dtype=np.float32))
+        return deg_from_action(np.asarray(action, dtype=np.float32), home_deg=self.home_deg)

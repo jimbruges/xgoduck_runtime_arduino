@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 data/zero_pos.json
 data/controller.json
+data/tuning.json
 tests/
 # local robot backups
 checkpoints/

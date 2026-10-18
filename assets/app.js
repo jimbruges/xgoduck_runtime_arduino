@@ -74,6 +74,7 @@ $('recovery-timer').textContent=!recovery.active?'—':roulade&&roulade.active?`
 if(pick&&pick.active)$('mouth').value=Math.round(s.mouth||0);}
 for(const [id,values]of [['acc-values',s.acc],['gyro-values',s.gyro],['gravity-values',s.gravity]])$(id).textContent=values?values.map(x=>x.toFixed(3)).join(' / '):'—';
 $('command-health').textContent=`sent ${s.sent} · MCU echo ${s.mcu_command_seq??'—'} · command age ${s.mcu_command_age_us<1e9?(s.mcu_command_age_us/1000).toFixed(1)+' ms':'—'} · gaps ${s.sequence_gaps} · rejected ${s.mcu_invalid_commands??0}`;
+renderTuning(s);
 const pad=s.pad||{};
 // While a controller drives motion, show the commands actually in effect.
 const driving=!!(pad.connected&&pad.active);
@@ -86,3 +87,30 @@ padDriving=driving;document.querySelectorAll('.joy,#head-controls input').forEac
 document.querySelectorAll('#head-controls input').forEach(el=>el.disabled=driving);$('pad-note').textContent=pad.connected?`Controller: ${pad.name||'connected'}${pad.active?' · its sticks drive motion; these pads are ignored':''}${pad.error?' · '+pad.error:''}`:'No Bluetooth controller connected. Pair one on the Controller page.';
 if(s.angles)$('joints').innerHTML=s.motors.map((id,i)=>`<tr class="${s.servo_ids.includes(id)?'':'missing'}"><td>${id}</td><td>${s.angles[i].toFixed(1)}</td><td>${s.targets[i].toFixed(1)}</td></tr>`).join('');
 }catch(e){showError(e);}finally{statusBusy=false;}},250);
+
+// Walk tuning
+let tuneBusy=false;
+function renderTuning(s){
+  const b=s.battery_v;
+  $('battery').textContent=b==null?'battery —':`battery ${b.toFixed(1)} V · max ${s.servo_temp_max??'—'} °C`;
+  $('battery').className=b!=null&&b<7.0?'warn-text':'';
+  const t=s.tuning;if(!t||tuneBusy)return;
+  document.querySelectorAll('[data-home]').forEach(x=>x.classList.toggle('active',x.dataset.home===t.home_source));
+  if(document.activeElement!==$('cmd-tau')){$('cmd-tau').value=t.cmd_tau_s;$('cmd-tau-v').textContent=t.cmd_tau_s?t.cmd_tau_s.toFixed(2)+' s':'off';}
+  $('imu-bias').textContent=`roll ${t.imu_bias_deg[0].toFixed(1)}° · pitch ${t.imu_bias_deg[1].toFixed(1)}°`;
+  const h=s.deployment&&s.deployment.home_deg;if(h)$('home-detail').textContent=`walk home now: hip pitch ${h[2].toFixed(1)}° / ankle ${h[4].toFixed(1)}° · knee ${h[3].toFixed(2)}°`;
+}
+async function setTuning(body,label){
+  tuneBusy=true;
+  try{await post('tuning',body);$('message').textContent=label;}catch(e){showError(e);}finally{tuneBusy=false;}
+}
+document.querySelectorAll('[data-home]').forEach(x=>x.onclick=()=>setTuning({home_source:x.dataset.home},`Home pose: ${x.textContent}`));
+$('cmd-tau').oninput=()=>{const v=+$('cmd-tau').value;$('cmd-tau-v').textContent=v?v.toFixed(2)+' s':'off';};
+$('cmd-tau').onchange=()=>setTuning({cmd_tau_s:+$('cmd-tau').value},'Command smoothing updated');
+$('level-imu').onclick=async()=>{
+  if(!confirm('Robot standing level (Default pose on flat ground, or body held level) and still?'))return;
+  tuneBusy=true;$('message').textContent='Levelling IMU… keep still';
+  try{const r=await post('tuning/level',{seconds:1});$('message').textContent=`IMU levelled: roll ${r.tuning.imu_bias_deg[0]}°, pitch ${r.tuning.imu_bias_deg[1]}° (${r.samples} samples)`;}
+  catch(e){showError(e);}finally{tuneBusy=false;}
+};
+$('reset-imu').onclick=()=>setTuning({imu_bias_deg:[0,0,0]},'IMU level reset');

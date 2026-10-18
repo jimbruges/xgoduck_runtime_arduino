@@ -64,6 +64,8 @@ struct __attribute__((packed)) RawPacket {
   uint16_t mask;
   uint16_t pos[15];
   uint16_t zero[15];
+  uint8_t volt[15];  // supply voltage per servo, 0.1 V
+  uint8_t temp[15];  // °C
 };
 struct __attribute__((packed)) ServoReplyPacket {
   char magic[4];
@@ -75,5 +77,5 @@ static_assert(sizeof(CommandPacket) == 80, "Command ABI");
 static_assert(sizeof(StatePacket) == 240, "State ABI");
 static_assert(sizeof(CalPacket) == 38, "Cal ABI");
 static_assert(sizeof(ServoPacket) == 12, "Servo ABI");
-static_assert(sizeof(RawPacket) == 66, "Raw ABI");
+static_assert(sizeof(RawPacket) == 96, "Raw ABI");
 static_assert(sizeof(ServoReplyPacket) == 12, "Servo reply ABI");

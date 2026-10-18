@@ -19,7 +19,24 @@ GRAVITY_TAU = 0.3
 # Those values go here; both accelerometer and gyro are rotated so standing gravity
 # becomes [0, 0, -1]. Yaw is unobservable from gravity; leave it 0 unless the board
 # is also twisted. Example: pitch inherently 5° → (0.0, 5.0, 0.0).
-IMU_BIAS_DEG = (0.0, 0.0, 0.0)  # roll, pitch, yaw
+IMU_BIAS_DEG = (0.0, 0.0, 0.0)  # roll, pitch, yaw; set at runtime by set_imu_bias()
+
+
+def set_imu_bias(roll: float, pitch: float, yaw: float = 0.0) -> None:
+    global IMU_BIAS_DEG
+    IMU_BIAS_DEG = (float(roll), float(pitch), float(yaw))
+
+
+def level_bias_from_gravity(grav: List[float]) -> Tuple[float, float]:
+    """(roll, pitch) in degrees that rotate a measured standing gravity onto [0, 0, -1].
+
+    _rotate_imu_bias applies roll first, then pitch, so pitch is taken after roll has
+    folded gy into gz.
+    """
+    gx, gy, gz = grav
+    roll = math.degrees(math.atan2(-gy, -gz))
+    pitch = math.degrees(math.atan2(gx, math.hypot(gy, gz)))
+    return roll, pitch
 
 MOTOR_IDS = [
     10, 11, 12, 13, 14,
@@ -133,11 +150,11 @@ class ImuFilter:
         st.vels = list(self._vel)
         return st
 
-def policy_from_state(st: State) -> Tuple[np.ndarray, np.ndarray]:
+def policy_from_state(st: State, home_deg: np.ndarray = HOME_DEG) -> Tuple[np.ndarray, np.ndarray]:
     """Absolute joint degrees minus the home pose, then converted to radians."""
     q_deg = np.asarray(st.angles, dtype=np.float32)[POLICY_INDEX]
     v_deg = np.asarray(st.vels, dtype=np.float32)[POLICY_INDEX]
-    return np.deg2rad(q_deg - HOME_DEG), np.deg2rad(v_deg)
+    return np.deg2rad(q_deg - home_deg), np.deg2rad(v_deg)
 
 def build_obs(
     st: State,
@@ -145,20 +162,22 @@ def build_obs(
     twist: np.ndarray,
     head: np.ndarray,
     out: np.ndarray | None = None,
+    home_deg: np.ndarray = HOME_DEG,
 ) -> np.ndarray:
     obs = np.empty(OBS_DIM, dtype=np.float32) if out is None else out
     obs[0:3] = st.gyro_rad
     obs[3:6] = st.grav
-    obs[6:20], obs[20:34] = policy_from_state(st)
+    obs[6:20], obs[20:34] = policy_from_state(st, home_deg)
     obs[34:48] = prev_action
     obs[48:51] = twist
     obs[51:55] = head
     obs[55:61] = 0.0
     return obs
 
-def action_to_deg(action: np.ndarray, mouth_deg: float = 0.0) -> List[float]:
+def action_to_deg(action: np.ndarray, mouth_deg: float = 0.0,
+                  home_deg: np.ndarray = HOME_DEG) -> List[float]:
     """Policy output is radians relative to home. Convert to degrees and add the home pose."""
-    q_deg = HOME_DEG + np.rad2deg(ACTION_SCALE * action)
+    q_deg = home_deg + np.rad2deg(ACTION_SCALE * action)
     targets = np.zeros(len(MOTOR_IDS), dtype=np.float32)
     targets[POLICY_INDEX] = q_deg
     targets[MOUTH_INDEX] = float(np.clip(mouth_deg, 0.0, MOUTH_MAX_DEG))

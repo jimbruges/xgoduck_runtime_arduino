@@ -8,9 +8,11 @@ from pathlib import Path
 from policy import Policy
 from recovery import Recovery
 from proc import SignalFilter
-from rl_core import MOTOR_IDS, HOME_DEG, DEFAULT_DEG, GRAVITY_TAU, IMU_BIAS_DEG, MOUTH_INDEX, MOUTH_MAX_DEG
+import rl_core
+from rl_core import MOTOR_IDS, HOME_DEG, DEFAULT_DEG, GRAVITY_TAU, MOUTH_INDEX, MOUTH_MAX_DEG
 from wire import *
 import pad
+import tuning
 
 FACTORY_ZERO = [
     2236, 2005, 1912, 1866, 1945,
@@ -95,6 +97,11 @@ class Controller:
         self.cal_done = [False]*15
         self.cal_targets = [None]*15
         self.raw_mask = 0
+        self.servo_volt = [0]*15  # 0.1 V, from the raw packet
+        self.servo_temp = [0]*15  # °C
+        self.cmd_twist_f, self.cmd_head_f = [0.0]*3, [0.0]*4  # command low-pass state
+        self.tuning = tuning.load()
+        self._apply_tuning()
         self.servo_reply = None
         self.servo_reply_event = threading.Event()
         self.servo_expected_reply = None
@@ -140,6 +147,7 @@ class Controller:
             if not self._zeros_pushed:
                 self._push_zeros()
             self.raw_pos = pkt['pos']
+            self.servo_volt, self.servo_temp = pkt['volt'], pkt['temp']
             self.raw_mask = pkt['mask']
             # After a push settles, trust MCU zeros; until then keep file values.
             if self._zeros_pushed:
@@ -239,6 +247,70 @@ class Controller:
             self.pick_policy.reset_action_filter()
             self.roulade_policy.reset_action_filter()
         return {'mode': mode}
+
+    def _policies(self):
+        return (self.policy, self.getup_policy, self.pick_policy, self.roulade_policy)
+
+    def _apply_tuning(self):
+        rl_core.set_imu_bias(*self.tuning['imu_bias_deg'])
+        use_model = self.tuning['home_source'] == 'model'
+        for p in self._policies():
+            p.use_model_home = use_model
+
+    def tuning_status(self):
+        return {'tuning': dict(self.tuning),
+                'home_deg': {p.file: [round(float(v), 2) for v in p.home_deg] for p in self._policies()},
+                'model_home_deg': {p.file: (None if p.model_home_deg is None else
+                                            [round(float(v), 2) for v in p.model_home_deg])
+                                   for p in self._policies()}}
+
+    def set_tuning(self, values):
+        with self.lock:
+            if 'home_source' in values and values['home_source'] != self.tuning['home_source'] \
+                    and self.mode == 'policy':
+                raise ValueError('switch the home pose while not walking')
+            new = tuning.validate(values, self.tuning)
+            with self.policy_lock:
+                self.tuning = new
+                self._apply_tuning()
+                for p in self._policies():
+                    p.reset_action_filter()
+            self.policy_needs_reset = True
+            tuning.save(new)
+        return self.tuning_status()
+
+    def level_imu(self, seconds=1.0):
+        """Average the accelerometer while the robot stands still and level, and store the
+        roll/pitch that maps it to [0, 0, -1]. Expects Default pose on flat ground, or the
+        body held level."""
+        acc, gyro, n = [0.0]*3, 0.0, 0
+        deadline = time.monotonic() + max(0.5, min(3.0, float(seconds)))
+        last = None
+        while time.monotonic() < deadline:
+            with self.lock:
+                fb, age = self.feedback, time.monotonic()-self.rx_time
+            if not fb or age > 0.15 or not fb.imu_ok:
+                raise ValueError('no fresh IMU data')
+            if fb is not last:
+                last = fb
+                acc = [a + b for a, b in zip(acc, fb.acc)]
+                gyro = max(gyro, math.sqrt(sum(g*g for g in fb.gyro)))
+                n += 1
+            time.sleep(0.005)
+        if n < 20:
+            raise ValueError('too few IMU samples')
+        mean = [a / n for a in acc]
+        norm = math.sqrt(sum(a*a for a in mean))
+        if gyro > 8.0:
+            raise ValueError(f'robot was moving (gyro peak {gyro:.1f}°/s); hold it still and retry')
+        if abs(norm / 9.8 - 1.0) > 0.1:
+            raise ValueError(f'acceleration {norm:.2f} m/s² is not ~1 g; hold it still and retry')
+        roll, pitch = rl_core.level_bias_from_gravity([a / norm for a in mean])
+        if abs(roll) > 30 or abs(pitch) > 30:
+            raise ValueError(f'tilt roll {roll:.1f}°, pitch {pitch:.1f}° is too large; is the robot level?')
+        status = self.set_tuning({'imu_bias_deg': [round(roll, 2), round(pitch, 2), 0.0]})
+        status.update(samples=n, gyro_peak_dps=round(gyro, 2))
+        return status
 
     def _models(self):
         return (self.policy, self.getup_policy, self.pick_policy, self.roulade_policy)
@@ -563,6 +635,15 @@ class Controller:
                         self.bridge.notify('duck_servo', encode_servo(SERVO_EXIT, 10))
                     self._disarm_now()
             twist, head, mouth = list(self.twist), list(self.head), self.mouth
+            tau = self.tuning['cmd_tau_s']
+            if tau > 0:
+                # First-order low-pass on the user command so stick steps reach the policy as ramps.
+                k = 1.0 - math.exp(-CONTROL_PERIOD / tau)
+                self.cmd_twist_f = [f + k*(v - f) for f, v in zip(self.cmd_twist_f, twist)]
+                self.cmd_head_f = [f + k*(v - f) for f, v in zip(self.cmd_head_f, head)]
+                twist, head = list(self.cmd_twist_f), list(self.cmd_head_f)
+            else:
+                self.cmd_twist_f, self.cmd_head_f = list(twist), list(head)
             valid = bool(fb and age < .15 and fb.imu_ok and filt
                          and filt['imu_fusion_ready'] and filt['imu_fusion_updated'])
             now = time.monotonic()
@@ -747,14 +828,20 @@ class Controller:
                 cal_targets=list(self.cal_targets), raw_mask=self.raw_mask)
             result['control_ready']=bool(fb and fb.imu_ok and now-self.rx_time<.15 and self.mode not in EXCLUSIVE_MODES)
             result['servo_scan_version'] = 1
+            present = [i for i in range(15) if self.raw_mask & (1 << i) and self.servo_volt[i]]
+            result['battery_v'] = min(self.servo_volt[i] for i in present) / 10 if present else None
+            result['servo_volt'] = [v / 10 for v in self.servo_volt]
+            result['servo_temp'] = list(self.servo_temp)
+            result['servo_temp_max'] = max((self.servo_temp[i] for i in present), default=None)
+            result['tuning'] = dict(self.tuning)
             result['pad'] = dict(self.pad_state, active=now-self.pad_time < PAD_ACTIVE_S,
                                  error=self.pad_error)
             result['deployment'] = dict(reference='rl/raspi_deploy', control_hz=50,
-                home_deg=HOME_DEG.tolist(), default_deg=DEFAULT_DEG,
+                home_deg=[float(v) for v in self.policy.home_deg], default_deg=DEFAULT_DEG,
                 action_scale=self.policy.action_scale, action_alpha=self.policy.action_alpha,
                 action_alpha_head=self.policy.action_alpha_head,
                 gyro_alpha=self.filter.gyro_alpha, velocity_alpha=self.filter.vel_alpha,
-                gravity_tau_s=GRAVITY_TAU, imu_bias_deg=list(IMU_BIAS_DEG),
+                gravity_tau_s=GRAVITY_TAU, imu_bias_deg=list(rl_core.IMU_BIAS_DEG),
                 filter_clock='host_receive', snapshot='latest')
             result['recovery'] = self.recovery.status()
             result['recovery']['active'] = self.mode in ('shadow','policy')

@@ -212,7 +212,7 @@ static void readSinglePresent(uint8_t id) {
   scsWriteBuf(id, 0x02, data, 2);
 }
 
-static void applyMotorFb(uint8_t id, int16_t pos, int32_t vel) {
+static void applyMotorFb(uint8_t id, int16_t pos, int32_t vel, uint8_t volt, uint8_t temp) {
   int idx = motorIndexById(id);
   if (idx < 0) {
     return;
@@ -224,6 +224,8 @@ static void applyMotorFb(uint8_t id, int16_t pos, int32_t vel) {
       (float)(pos - motors[idx].zeroPos) * M_A / M_N * motors[idx].sign;
   motors[idx].fbVelDeg =
       (float)vel * SERVO_SPEED_UNIT * (360.0f / 4096.0f) * motors[idx].sign;
+  motors[idx].fbVolt = volt;
+  motors[idx].fbTemp = temp;
   k_mutex_unlock(&motorsMu);
 }
 
@@ -264,7 +266,7 @@ static void parseServoRx() {
         break;
       case 3:
         servoRxBuffer[3] = res;
-        if (res == 0x02 || res == 0x04 || res == 0x08 || res == 0x09 || res == 0x0B) {
+        if (res == 0x02 || res == 0x04 || res == 0x08 || res == 0x09 || res == 0x0A || res == 0x0B) {
           servoParserFlag = 4;
           servoRxLen = 0;
           servoRxDataLen = res;
@@ -307,8 +309,8 @@ static void parseServoRx() {
             servoPdMask |= 1u << idx;
             break;
           }
-          // Only accept the requested 6-byte status, with no device error.
-          if (dataLen != 8 || servoRxBuffer[4] != 0) {
+          // Only accept the requested status block, with no device error.
+          if (dataLen != PRESENT_LEN + 2 || servoRxBuffer[4] != 0) {
             break;
           }
           if (servoReadId <= 253 && sid == servoReadId) {
@@ -316,7 +318,8 @@ static void parseServoRx() {
             servoReadPos = (uint16_t)hostWord(servoRxBuffer[5], servoRxBuffer[6]);
           }
           applyMotorFb(sid, hostWord(servoRxBuffer[5], servoRxBuffer[6]),
-                       hostVelSignMag(servoRxBuffer[7], servoRxBuffer[8]));
+                       hostVelSignMag(servoRxBuffer[7], servoRxBuffer[8]),
+                       servoRxBuffer[11], servoRxBuffer[12]);
         }
         break;
       default:

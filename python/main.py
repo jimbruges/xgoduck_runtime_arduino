@@ -97,6 +97,14 @@ def bt_action(action, timeout=5):
         return helper('/bt/'+action, body, timeout)
     return handler
 
+def tuning_set(body: dict):
+    try: return controller.set_tuning(body)
+    except (TypeError, ValueError) as exc: raise HTTPException(400, str(exc))
+
+def tuning_level(body: dict = None):
+    try: return controller.level_imu((body or {}).get('seconds', 1.0))
+    except (TypeError, ValueError) as exc: raise HTTPException(400, str(exc))
+
 def pad_input(body: dict):
     return controller.pad_input(body)
 
@@ -105,6 +113,9 @@ def pad_config_set(body: dict):
     except (TypeError, ValueError) as exc: raise HTTPException(400, str(exc))
 
 ui.expose_api('GET', '/api/status', controller.status)
+ui.expose_api('GET', '/api/tuning', controller.tuning_status)
+ui.expose_api('POST', '/api/tuning', tuning_set)
+ui.expose_api('POST', '/api/tuning/level', tuning_level)
 ui.expose_api('POST', '/api/pad', pad_input)
 ui.expose_api('GET', '/api/pad/config', controller.pad_config)
 ui.expose_api('POST', '/api/pad/config', pad_config_set)
