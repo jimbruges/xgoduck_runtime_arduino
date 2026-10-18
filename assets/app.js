@@ -104,6 +104,7 @@ function renderTuning(s){
   const g=s.servo_gains;
   if(g){for(const k of ['kp','kd'])if(document.activeElement!==$('servo-'+k)){$('servo-'+k).value=g[k];$(`servo-${k}-v`).textContent=g[k];}
     $('gain-state').textContent=g.synced?'· applied':'· applying…';}
+  if(t.walk_model&&document.activeElement!==$('walk-model')&&$('walk-model').value&&$('walk-model').value!==t.walk_model)$('walk-model').value=t.walk_model;
   const h=s.deployment&&s.deployment.home_deg;if(h)$('home-detail').textContent=`walk home now: hip pitch ${h[2].toFixed(1)}° / ankle ${h[4].toFixed(1)}° · knee ${h[3].toFixed(2)}°`;
 }
 async function setTuning(body,label){
@@ -145,3 +146,11 @@ $('home-lean').oninput=()=>{$('home-lean-v').textContent=leanLabel($('home-lean'
 $('home-lean').onchange=()=>setTuning({home_lean_deg:+$('home-lean').value},`Home lean set to ${$('home-lean').value}°`);
 $('home-lean-back').oninput=()=>{$('home-lean-back-v').textContent=leanLabel($('home-lean-back').value);};
 $('home-lean-back').onchange=()=>setTuning({home_lean_back_deg:+$('home-lean-back').value},`Backward lean set to ${$('home-lean-back').value}°`);
+
+async function loadWalkModels(){
+  try{const r=await (await fetch('/api/tuning')).json();
+    $('walk-model').innerHTML=r.walk_models.map(m=>`<option${m===r.tuning.walk_model?' selected':''}>${m}</option>`).join('');}
+  catch(_){}
+}
+$('walk-model').onchange=()=>setTuning({walk_model:$('walk-model').value},`Walk policy: ${$('walk-model').value}`);
+loadWalkModels();

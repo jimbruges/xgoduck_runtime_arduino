@@ -113,6 +113,12 @@ class Controller:
         self.servo_temp = [0]*15  # °C
         self.cmd_twist_f, self.cmd_head_f = [0.0]*3, [0.0]*4  # command low-pass state
         self.tuning = tuning.load()
+        if self.tuning['walk_model'] != self.policy.file:
+            try:
+                self._load_walk_model(self.tuning['walk_model'])
+            except ValueError as exc:
+                self.last_error = f'walk model {self.tuning["walk_model"]}: {exc}; using {self.policy.file}'
+                self.tuning['walk_model'] = self.policy.file
         self._apply_tuning()
         self.servo_reply = None
         self.servo_reply_event = threading.Event()
@@ -349,6 +355,24 @@ class Controller:
     def _policies(self):
         return (self.policy, self.getup_policy, self.pick_policy, self.roulade_policy)
 
+    def _load_walk_model(self, name):
+        """Swap the walk policy for another xgoduck_walk*.onnx (Walk tuning A/B)."""
+        p = Policy()
+        ok, message = p.load(name)
+        if not ok:
+            raise ValueError(message)
+        old = self.policy
+        p.action_alpha, p.action_alpha_head = old.action_alpha, old.action_alpha_head
+        with self.policy_lock:
+            self.policy = p
+            p.reset_action_filter()
+        self.policy_needs_reset = True
+        parts = self.model_message.split('; ')
+        self.model_message = '; '.join([message] + parts[1:])
+
+    def walk_models(self):
+        return sorted(f.name for f in Path(__file__).parent.glob('xgoduck_walk*.onnx'))
+
     def _apply_tuning(self):
         rl_core.set_imu_bias(*self.tuning['imu_bias_deg'])
         use_model = self.tuning['home_source'] == 'model'
@@ -359,7 +383,7 @@ class Controller:
                          rl_core.lean_offsets(MOTOR_IDS, self.tuning['home_lean_deg'])).tolist()
 
     def tuning_status(self):
-        return {'tuning': dict(self.tuning),
+        return {'tuning': dict(self.tuning), 'walk_models': self.walk_models(),
                 'home_deg': {p.file: [round(float(v), 2) for v in p.home_deg] for p in self._policies()},
                 'model_home_deg': {p.file: (None if p.model_home_deg is None else
                                             [round(float(v), 2) for v in p.model_home_deg])
@@ -367,10 +391,12 @@ class Controller:
 
     def set_tuning(self, values):
         with self.lock:
-            for key in ('home_source', 'home_lean_deg', 'home_lean_back_deg'):
+            for key in ('home_source', 'home_lean_deg', 'home_lean_back_deg', 'walk_model'):
                 if key in values and values[key] != self.tuning[key] and self.mode == 'policy':
                     raise ValueError('change the home pose while not walking')
             new = tuning.validate(values, self.tuning)
+            if new['walk_model'] != self.policy.file:
+                self._load_walk_model(new['walk_model'])
             gains_changed = (new['servo_kp'], new['servo_kd']) != \
                 (self.tuning['servo_kp'], self.tuning['servo_kd'])
             with self.policy_lock:

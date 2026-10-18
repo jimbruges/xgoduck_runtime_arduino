@@ -18,6 +18,15 @@ Getting the robot to walk uncovered five problems. Each has a fix or a setting, 
 
 Also: the home pose now follows each model's training metadata (20°, not the hand-tuned 23°); the IMU is levelled against a spirit level (about 4° board tilt); and command smoothing is available. The controller, calibration and setup tools below support all of this.
 
+## Retrained walk policy (real mass and centre of mass)
+
+The original walk policy was trained on a model without the Uno Q, shield and battery at the back. A retrained policy comes from [jimbruges/xgoduck_rl](https://github.com/jimbruges/xgoduck_rl), branch `real-mass-com`, which changes three things from Luwu's model:
+- the real total mass (825 g), with the trunk's centre of mass moved back so the whole robot's sits 8 mm further back;
+- current xgoduck_rl's ±15 mm centre-of-mass randomisation;
+- an 8–24 ms randomised command delay, matching this runtime.
+
+It was trained with Hugging Face Jobs (`--hf-jobs`, L4 GPU, about 3 h and $3) and exported with `scripts/export.py`. **Walk policy** in Walk tuning switches between `xgoduck_walk.onnx` and any other `python/xgoduck_walk*.onnx` for A/B testing.
+
 ## Calibration no longer starts every servo at once
 
 Upstream, **Start calibration** enabled torque on all 15 servos and sent each one straight to raw 2047 from wherever it was. On an assembled robot the combined inrush tripped the 8.4 V pack and reset the shield.

@@ -257,6 +257,14 @@ The section header shows the lowest servo supply voltage (register 62) and the h
 - **Why:** the XGO policies were trained with a 7.4–8.0 V supply (`xgoduck_rl/.../xgoduck_constants.py`, `vin_range`). Below that, servo torque, and with it walking, degrades. A flat pack also caused shield brownouts on the development robot, which reset the IMU.
 - **Tune:** the readout turns amber below 7.4 V; charge before testing.
 
+### Walk policy
+
+- **What:** the ONNX walk model the robot runs. Any `python/xgoduck_walk*.onnx` can be chosen.
+- **Why:** the original `xgoduck_walk.onnx` was trained without the battery and Uno Q at the back. `xgoduck_walk_realcom.onnx` was retrained ([jimbruges/xgoduck_rl](https://github.com/jimbruges/xgoduck_rl), branch `real-mass-com`) with the real 825 g mass, the centre of mass 8 mm back, ±15 mm centre-of-mass randomisation and an 8–24 ms command delay.
+- **Tune:** compare both on the same walk using **Last walk**. Use Home pose **Model**, so each policy uses the home it was trained with (22° for the retrained one). It may need less Home lean. Switch only while not walking.
+
+To retrain: in the xgoduck_rl fork, run `uv run hf auth login`, then `uv run train Mjlab-Velocity-Flat-XgoDuck --env.scene.num-envs 4096 --agent.max_iterations 4000 --hf-jobs --no-wandb`. Download the final `model_*.pt` from the checkpoint repo and export it with `uv run python scripts/export.py Mjlab-Velocity-Flat-XgoDuck --checkpoint-file <model.pt> --onnx-file xgoduck_walk_<name>.onnx`. Copy the result to `python/` on the robot.
+
 ### Home pose (Table / Model)
 
 - **What:** the joint pose the policy measures its observations from and adds its actions to.

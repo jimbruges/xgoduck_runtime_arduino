@@ -1,6 +1,7 @@
 """Walk tuning saved on the robot in data/tuning.json, set from the Control page."""
 import json
 import math
+import re
 from pathlib import Path
 
 PATH = Path(__file__).resolve().parents[1] / 'data' / 'tuning.json'
@@ -24,7 +25,10 @@ DEFAULTS = {
     # Lean used when walking backward; the applied lean blends from home_lean_deg to this
     # as the commanded vx goes from 0 to -0.2 m/s. Equal to home_lean_deg = no blending.
     'home_lean_back_deg': 0.0,
+    # Walk policy file in python/ (xgoduck_walk*.onnx), for A/B testing retrained models.
+    'walk_model': 'xgoduck_walk.onnx',
 }
+WALK_MODEL = re.compile(r'^xgoduck_walk[\w.-]*\.onnx$')
 MOUTH_KP = 10  # mouth servo run KP, as in firmware
 
 
@@ -56,6 +60,11 @@ def validate(values, base=None):
             if not math.isfinite(lean) or not -10 <= lean <= 15:
                 raise ValueError('home lean must be within -10..15°')
             out[key] = lean
+    if 'walk_model' in values:
+        name = str(values['walk_model'])
+        if not WALK_MODEL.match(name) or not (Path(__file__).parent / name).is_file():
+            raise ValueError(f'walk model {name!r} not found in python/')
+        out['walk_model'] = name
     if 'imu_bias_deg' in values:
         bias = [float(v) for v in values['imu_bias_deg']]
         if len(bias) != 3 or any(not math.isfinite(v) or abs(v) > 30 for v in bias):
