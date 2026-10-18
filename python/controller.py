@@ -37,6 +37,11 @@ CONTROL_PERIOD = 0.02
 HEAD_HOLD_RANGE_DEG = (30.0, 35.0, 60.0, 20.0)
 HEAD_HOLD_STEP_DEG = 2.0
 HEAD_INDICES = [MOTOR_IDS.index(i) for i in (30, 31, 32, 33)]
+# Speed-dependent lean: blend to home_lean_back_deg at this backward speed, and move the
+# applied lean at most LEAN_STEP_DEG per 20 ms tick so the policy's joint observations
+# never jump.
+LEAN_FULL_BACK_VX = 0.2
+LEAN_STEP_DEG = 0.4
 PAD_ACTIVE_S = 0.3  # a pad sample this recent overrides page motion and keeps the heartbeat
 
 class Controller:
@@ -80,6 +85,7 @@ class Controller:
         self.twist, self.head, self.mouth = [0.0]*3, [0.0]*4, 0.0
         self.web_time = 0.0
         self.hold_head = [0.0]*4  # applied head offsets in Default pose, degrees
+        self.lean_now = 0.0  # home lean applied to the policies this tick, degrees
         self.pad = pad.Mapper()
         self.pad_time = 0.0
         self.pad_state = {'connected': False}
@@ -348,7 +354,7 @@ class Controller:
         use_model = self.tuning['home_source'] == 'model'
         for p in self._policies():
             p.use_model_home = use_model
-            p.lean_deg = self.tuning['home_lean_deg']
+            p.lean_deg = self.lean_now = self.tuning['home_lean_deg']
         self.hold_deg = (np.asarray(DEFAULT_DEG, dtype=np.float32) +
                          rl_core.lean_offsets(MOTOR_IDS, self.tuning['home_lean_deg'])).tolist()
 
@@ -361,7 +367,7 @@ class Controller:
 
     def set_tuning(self, values):
         with self.lock:
-            for key in ('home_source', 'home_lean_deg'):
+            for key in ('home_source', 'home_lean_deg', 'home_lean_back_deg'):
                 if key in values and values[key] != self.tuning[key] and self.mode == 'policy':
                     raise ValueError('change the home pose while not walking')
             new = tuning.validate(values, self.tuning)
@@ -766,6 +772,12 @@ class Controller:
                 twist, head = list(self.cmd_twist_f), list(self.cmd_head_f)
             else:
                 self.cmd_twist_f, self.cmd_head_f = list(twist), list(head)
+            t = self.tuning
+            back = max(0.0, min(1.0, -twist[0] / LEAN_FULL_BACK_VX)) if mode == 'policy' else 0.0
+            want = t['home_lean_deg'] + back * (t['home_lean_back_deg'] - t['home_lean_deg'])
+            self.lean_now += max(-LEAN_STEP_DEG, min(LEAN_STEP_DEG, want - self.lean_now))
+            for p in self._policies():
+                p.lean_deg = self.lean_now
             valid = bool(fb and age < .15 and fb.imu_ok and filt
                          and filt['imu_fusion_ready'] and filt['imu_fusion_updated'])
             now = time.monotonic()
@@ -805,7 +817,9 @@ class Controller:
             exclusive = mode in EXCLUSIVE_MODES
         if exclusive:
             return
-        target = list(self.hold_deg)
+        # Default pose follows the same slewed lean as the policies.
+        target = (np.asarray(DEFAULT_DEG, dtype=np.float32) +
+                  rl_core.lean_offsets(MOTOR_IDS, self.lean_now)).tolist()
         if inferring and phase == 'default_pose':
             # Switch to getup immediately, but force action/history to zero for 1 s.
             with self.policy_lock:
@@ -965,6 +979,7 @@ class Controller:
             result['servo_temp'] = list(self.servo_temp)
             result['servo_temp_max'] = max((self.servo_temp[i] for i in present), default=None)
             result['tuning'] = dict(self.tuning)
+            result['lean_now_deg'] = round(self.lean_now, 2)
             result['joint_signs'] = self.joint_signs()
             result['servo_gains'] = {'kp': self.tuning['servo_kp'], 'kd': self.tuning['servo_kd'],
                                      'mcu': self.mcu_gains, 'synced': self._gains_synced()}

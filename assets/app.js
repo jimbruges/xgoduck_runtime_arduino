@@ -99,6 +99,8 @@ function renderTuning(s){
   if(document.activeElement!==$('cmd-tau')){$('cmd-tau').value=t.cmd_tau_s;$('cmd-tau-v').textContent=t.cmd_tau_s?t.cmd_tau_s.toFixed(2)+' s':'off';}
   $('imu-bias').textContent=`roll ${t.imu_bias_deg[0].toFixed(1)}° · pitch ${t.imu_bias_deg[1].toFixed(1)}°`;
   if(document.activeElement!==$('home-lean')){$('home-lean').value=t.home_lean_deg??0;$('home-lean-v').textContent=leanLabel(t.home_lean_deg??0);}
+  if(document.activeElement!==$('home-lean-back')){$('home-lean-back').value=t.home_lean_back_deg??0;$('home-lean-back-v').textContent=leanLabel(t.home_lean_back_deg??0);}
+  $('lean-now').textContent=s.lean_now_deg!=null?`· now ${s.lean_now_deg.toFixed(1)}°`:'';
   const g=s.servo_gains;
   if(g){for(const k of ['kp','kd'])if(document.activeElement!==$('servo-'+k)){$('servo-'+k).value=g[k];$(`servo-${k}-v`).textContent=g[k];}
     $('gain-state').textContent=g.synced?'· applied':'· applying…';}
@@ -141,3 +143,5 @@ setInterval(()=>{if(!document.hidden)refreshWalk();},2000);
 function leanLabel(v){v=+v;return v?`${v>0?'+':''}${v}° · body ~${Math.abs(v*1.3).toFixed(0)} mm ${v>0?'forward':'back'}`:'0°';}
 $('home-lean').oninput=()=>{$('home-lean-v').textContent=leanLabel($('home-lean').value);};
 $('home-lean').onchange=()=>setTuning({home_lean_deg:+$('home-lean').value},`Home lean set to ${$('home-lean').value}°`);
+$('home-lean-back').oninput=()=>{$('home-lean-back-v').textContent=leanLabel($('home-lean-back').value);};
+$('home-lean-back').onchange=()=>setTuning({home_lean_back_deg:+$('home-lean-back').value},`Backward lean set to ${$('home-lean-back').value}°`);

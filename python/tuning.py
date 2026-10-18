@@ -21,6 +21,9 @@ DEFAULTS = {
     # the feet), for the policies' home and Default pose. Compensates a CoM behind the
     # trained one; about 1.3 mm per degree.
     'home_lean_deg': 0.0,
+    # Lean used when walking backward; the applied lean blends from home_lean_deg to this
+    # as the commanded vx goes from 0 to -0.2 m/s. Equal to home_lean_deg = no blending.
+    'home_lean_back_deg': 0.0,
 }
 MOUTH_KP = 10  # mouth servo run KP, as in firmware
 
@@ -47,11 +50,12 @@ def validate(values, base=None):
         if not 0 <= kd <= 40:
             raise ValueError('servo KD must be within 0..40')
         out['servo_kd'] = kd
-    if 'home_lean_deg' in values:
-        lean = float(values['home_lean_deg'])
-        if not math.isfinite(lean) or not -10 <= lean <= 10:
-            raise ValueError('home lean must be within ±10°')
-        out['home_lean_deg'] = lean
+    for key in ('home_lean_deg', 'home_lean_back_deg'):
+        if key in values:
+            lean = float(values[key])
+            if not math.isfinite(lean) or not -10 <= lean <= 15:
+                raise ValueError('home lean must be within -10..15°')
+            out[key] = lean
     if 'imu_bias_deg' in values:
         bias = [float(v) for v in values['imu_bias_deg']]
         if len(bias) != 3 or any(not math.isfinite(v) or abs(v) > 30 for v in bias):
