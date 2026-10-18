@@ -1,5 +1,6 @@
 """100Hz receive/filter callback and independent 50Hz ONNX loop."""
 import collections
+import numpy as np
 import json
 import math
 import threading
@@ -347,6 +348,9 @@ class Controller:
         use_model = self.tuning['home_source'] == 'model'
         for p in self._policies():
             p.use_model_home = use_model
+            p.lean_deg = self.tuning['home_lean_deg']
+        self.hold_deg = (np.asarray(DEFAULT_DEG, dtype=np.float32) +
+                         rl_core.lean_offsets(MOTOR_IDS, self.tuning['home_lean_deg'])).tolist()
 
     def tuning_status(self):
         return {'tuning': dict(self.tuning),
@@ -357,9 +361,9 @@ class Controller:
 
     def set_tuning(self, values):
         with self.lock:
-            if 'home_source' in values and values['home_source'] != self.tuning['home_source'] \
-                    and self.mode == 'policy':
-                raise ValueError('switch the home pose while not walking')
+            for key in ('home_source', 'home_lean_deg'):
+                if key in values and values[key] != self.tuning[key] and self.mode == 'policy':
+                    raise ValueError('change the home pose while not walking')
             new = tuning.validate(values, self.tuning)
             gains_changed = (new['servo_kp'], new['servo_kd']) != \
                 (self.tuning['servo_kp'], self.tuning['servo_kd'])
@@ -801,7 +805,7 @@ class Controller:
             exclusive = mode in EXCLUSIVE_MODES
         if exclusive:
             return
-        target = list(DEFAULT_DEG)
+        target = list(self.hold_deg)
         if inferring and phase == 'default_pose':
             # Switch to getup immediately, but force action/history to zero for 1 s.
             with self.policy_lock:

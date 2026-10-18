@@ -17,6 +17,10 @@ DEFAULTS = {
     # Firmware defaults are KP 6, KD 20; higher KP is stiffer, lower KD is quicker.
     'servo_kp': 6,
     'servo_kd': 20,
+    # Degrees the hip pitch and ankle home angles move toward upright (body forward over
+    # the feet), for the policies' home and Default pose. Compensates a CoM behind the
+    # trained one; about 1.3 mm per degree.
+    'home_lean_deg': 0.0,
 }
 MOUTH_KP = 10  # mouth servo run KP, as in firmware
 
@@ -43,6 +47,11 @@ def validate(values, base=None):
         if not 0 <= kd <= 40:
             raise ValueError('servo KD must be within 0..40')
         out['servo_kd'] = kd
+    if 'home_lean_deg' in values:
+        lean = float(values['home_lean_deg'])
+        if not math.isfinite(lean) or not -10 <= lean <= 10:
+            raise ValueError('home lean must be within ±10°')
+        out['home_lean_deg'] = lean
     if 'imu_bias_deg' in values:
         bias = [float(v) for v in values['imu_bias_deg']]
         if len(bias) != 3 or any(not math.isfinite(v) or abs(v) > 30 for v in bias):

@@ -59,6 +59,21 @@ POLICY_IDS = [
 
 POLICY_INDEX = np.array([MOTOR_IDS.index(i) for i in POLICY_IDS])
 
+# Hip pitch and ankle joints with the sign of their home lean (hip/ankle angles pull
+# in opposite directions so the foot stays flat). A positive lean offset moves each of
+# them that many degrees toward 0, standing the legs up and moving the body forward over
+# the feet: about 1.3 mm per degree on this robot.
+_LEAN_SIGNS = {12: -1.0, 14: +1.0, 22: +1.0, 24: -1.0}
+
+
+def lean_offsets(ids: List[int], lean_deg: float) -> np.ndarray:
+    """Per-joint degree offsets, in the order of ids, for a home lean offset."""
+    out = np.zeros(len(ids), dtype=np.float32)
+    for k, i in enumerate(ids):
+        if i in _LEAN_SIGNS:
+            out[k] = -_LEAN_SIGNS[i] * lean_deg
+    return out
+
 HOME_DEG = np.array(DEFAULT_DEG, dtype=np.float32)[POLICY_INDEX]
 
 MOUTH_INDEX = MOTOR_IDS.index(34)

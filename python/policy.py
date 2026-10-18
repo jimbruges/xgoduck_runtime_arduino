@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 from typing import Optional
 import numpy as np
-from rl_core import (HOME_DEG, ACTION_SCALE, ACTION_ALPHA, ACTION_ALPHA_HEAD,
+from rl_core import (HOME_DEG, POLICY_IDS, lean_offsets, ACTION_SCALE, ACTION_ALPHA, ACTION_ALPHA_HEAD,
                      OBS_DIM, ACTION_DIM, State, build_obs as make_obs,
                      action_to_deg as deg_from_action)
 HOME_RAD = np.deg2rad(HOME_DEG)
@@ -33,6 +33,7 @@ class Policy:
         # use_model_home picks it over the hand-tuned HOME_DEG table for obs and actions.
         self.model_home_deg = None
         self.use_model_home = False
+        self.lean_deg = 0.0  # Walk tuning home lean offset
         self._obs = np.empty(OBS_DIM, dtype=np.float32)
         self.reset_action_filter()
 
@@ -125,9 +126,11 @@ class Policy:
 
     @property
     def home_deg(self):
-        if self.use_model_home and self.model_home_deg is not None:
-            return self.model_home_deg
-        return HOME_DEG
+        base = self.model_home_deg if self.use_model_home and self.model_home_deg is not None \
+            else HOME_DEG
+        if self.lean_deg:
+            return base + lean_offsets(POLICY_IDS, self.lean_deg)
+        return base
 
     def action_to_deg(self, action):
         return deg_from_action(np.asarray(action, dtype=np.float32), home_deg=self.home_deg)

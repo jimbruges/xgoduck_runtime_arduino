@@ -98,6 +98,7 @@ function renderTuning(s){
   document.querySelectorAll('[data-home]').forEach(x=>x.classList.toggle('active',x.dataset.home===t.home_source));
   if(document.activeElement!==$('cmd-tau')){$('cmd-tau').value=t.cmd_tau_s;$('cmd-tau-v').textContent=t.cmd_tau_s?t.cmd_tau_s.toFixed(2)+' s':'off';}
   $('imu-bias').textContent=`roll ${t.imu_bias_deg[0].toFixed(1)}° · pitch ${t.imu_bias_deg[1].toFixed(1)}°`;
+  if(document.activeElement!==$('home-lean')){$('home-lean').value=t.home_lean_deg??0;$('home-lean-v').textContent=leanLabel(t.home_lean_deg??0);}
   const g=s.servo_gains;
   if(g){for(const k of ['kp','kd'])if(document.activeElement!==$('servo-'+k)){$('servo-'+k).value=g[k];$(`servo-${k}-v`).textContent=g[k];}
     $('gain-state').textContent=g.synced?'· applied':'· applying…';}
@@ -136,3 +137,7 @@ $('walk-refresh').onclick=refreshWalk;
 $('walk-clear').onclick=async()=>{try{await post('log/clear',{});$('walk-summary').textContent='Cleared. Walk, then Refresh.';}catch(e){showError(e);}};
 refreshWalk();
 setInterval(()=>{if(!document.hidden)refreshWalk();},2000);
+
+function leanLabel(v){v=+v;return v?`${v>0?'+':''}${v}° · body ~${Math.abs(v*1.3).toFixed(0)} mm ${v>0?'forward':'back'}`:'0°';}
+$('home-lean').oninput=()=>{$('home-lean-v').textContent=leanLabel($('home-lean').value);};
+$('home-lean').onchange=()=>setTuning({home_lean_deg:+$('home-lean').value},`Home lean set to ${$('home-lean').value}°`);
