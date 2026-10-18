@@ -90,6 +90,8 @@ class Controller:
         self.infer_times = collections.deque(maxlen=500)
         self.infer_ms = collections.deque(maxlen=500)
         self.rx_intervals = collections.deque(maxlen=1000)
+        # Flight recorder: the last 20 s of control ticks while position control is on.
+        self.flight = collections.deque(maxlen=1000)
         self.loop_missed = 0
         self.last_action = [0.0]*15
         self.started = time.monotonic()
@@ -109,6 +111,10 @@ class Controller:
         self.servo_expected_reply = None
         self._zeros_pushed = False
         self._load_zeros()
+        # Saved zeros the MCU must use; zero_pos mirrors what the MCU reports.
+        self.zero_target = list(self.zero_pos)
+        self._zeros_sent = 0.0
+        self._resync_hold_until = 0.0  # Finish changes an MCU zero before the host records it
         self.sign_mask = self._load_signs()  # bit i: joint i uses direction +1
         self.mcu_sign_mask = None
         self._signs_sent = 0.0
@@ -128,7 +134,7 @@ class Controller:
         payload = {
             'version': 1,
             'ids': list(MOTOR_IDS),
-            'zero_pos': list(self.zero_pos),
+            'zero_pos': list(self.zero_target),
             'saved_at': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
         }
         ZERO_PATH.write_text(json.dumps(payload, indent=2), encoding='utf-8')
@@ -176,8 +182,12 @@ class Controller:
                 'synced': self.mcu_sign_mask == self.sign_mask}
 
     def _push_zeros(self):
-        self.bridge.notify('duck_cal', encode_cal(CAL_SET_ZEROS, mask=ALL_MASK, raw=self.zero_pos))
+        self.bridge.notify('duck_cal', encode_cal(CAL_SET_ZEROS, mask=ALL_MASK, raw=self.zero_target))
         self._zeros_pushed = True
+        self._zeros_sent = time.monotonic()
+
+    def _calibration_synced(self):
+        return self.zero_pos == self.zero_target and self.mcu_sign_mask == self.sign_mask
 
     def receive_boot_pd(self, raw):
         if not isinstance(raw, (bytes, bytearray)) or len(raw)!=32: return
@@ -191,18 +201,22 @@ class Controller:
         except ValueError:
             return
         with self.lock:
-            if not self._zeros_pushed:
-                self._push_zeros()
             self.raw_pos = pkt['pos']
             self.servo_volt, self.servo_temp = pkt['volt'], pkt['temp']
             self.raw_mask = pkt['mask']
             self.mcu_sign_mask = pkt['pos_sign_mask']
-            # Directions live in MCU RAM: re-send after an MCU reset, or if a send was lost.
-            if self.mcu_sign_mask != self.sign_mask and time.monotonic()-self._signs_sent > 0.5:
+            self.zero_pos = pkt['zero']
+            # Zeros and directions live in MCU RAM: re-send after an MCU reset or a lost
+            # message. The MCU holds one pending calibration message, so send at most one
+            # per packet: a second would overwrite the first before the MCU reads it.
+            now = time.monotonic()
+            if now < self._resync_hold_until:
+                pass
+            elif self.zero_pos != self.zero_target:
+                if now-self._zeros_sent > 0.5:
+                    self._push_zeros()
+            elif self.mcu_sign_mask != self.sign_mask and now-self._signs_sent > 0.5:
                 self._push_signs()
-            # After a push settles, trust MCU zeros; until then keep file values.
-            if self._zeros_pushed:
-                self.zero_pos = pkt['zero']
 
     def receive_servo_reply(self, raw):
         try:
@@ -269,6 +283,8 @@ class Controller:
             fb = None
             if mode in ('hold', 'policy'):
                 fb = self._require_feedback(0)
+                if not self._calibration_synced():
+                    raise ValueError('calibration zeros/directions are not confirmed on the MCU yet; wait a moment')
             previous = self.mode
             self.generation += 1; self.mode = mode
             self.recovery.reset(); self.policy_needs_reset = True
@@ -363,6 +379,18 @@ class Controller:
         status = self.set_tuning({'imu_bias_deg': [round(roll, 2), round(pitch, 2), 0.0]})
         status.update(samples=n, gyro_peak_dps=round(gyro, 2))
         return status
+
+    FLIGHT_FIELDS = ('t', 'mode', 'phase', 'enabled', 'grav', 'gyro_rad', 'angles_deg',
+                     'target_deg', 'twist', 'head')
+
+    def flight_log(self):
+        with self.lock:
+            return {'fields': self.FLIGHT_FIELDS, 'motors': MOTOR_IDS, 'samples': list(self.flight)}
+
+    def flight_clear(self):
+        with self.lock:
+            self.flight.clear()
+        return {'ok': True}
 
     def _models(self):
         return (self.policy, self.getup_policy, self.pick_policy, self.roulade_policy)
@@ -534,6 +562,7 @@ class Controller:
             if self.mode != 'calibrate':
                 raise ValueError('not in calibrate mode')
             # The MCU re-centres the servo's position offset so this pose reads CAL_ZERO.
+            self._resync_hold_until = time.monotonic() + 2.0
             self.bridge.notify('duck_cal', encode_cal(CAL_FINISH_ONE, index=index))
             self.web_time = time.monotonic()
         # Confirm from fresh raw feedback before saving; the EEPROM write takes ~25 ms.
@@ -549,7 +578,9 @@ class Controller:
                                  f'(reads {raw}); its zero was not changed')
             time.sleep(0.05)
         with self.lock:
+            self.zero_target[index] = CAL_ZERO
             self.zero_pos[index] = CAL_ZERO
+            self._resync_hold_until = 0.0
             self.cal_done[index] = True
             self._save_zeros()
             self.web_time = time.monotonic()
@@ -786,6 +817,12 @@ class Controller:
             if mode != 'hold':
                 self.hold_head = [0.0]*4
             if fb is None: return
+            if mode in ('hold', 'policy'):
+                self.flight.append((round(time.monotonic(), 3), mode, phase, int(fb.enabled),
+                    [round(v, 3) for v in (filt['grav'] if filt else (0, 0, -1))],
+                    [round(v, 3) for v in (filt['gyro_rad'] if filt else (0, 0, 0))],
+                    [round(v, 1) for v in fb.angles], [round(float(v), 1) for v in target],
+                    [round(v, 3) for v in twist], [round(v, 2) for v in head]))
             self.last_action = list(target)
             self.seq = (self.seq+1)&0xffffffff
             payload = encode_command(self.seq, fb.sample_us, command_mode, target)
@@ -878,7 +915,9 @@ class Controller:
                 raw_pos=list(self.raw_pos), zero_pos=list(self.zero_pos),
                 factory_zero_pos=list(FACTORY_ZERO), cal_done=list(self.cal_done),
                 cal_targets=list(self.cal_targets), raw_mask=self.raw_mask)
-            result['control_ready']=bool(fb and fb.imu_ok and now-self.rx_time<.15 and self.mode not in EXCLUSIVE_MODES)
+            result['control_ready']=bool(fb and fb.imu_ok and now-self.rx_time<.15 and self.mode not in EXCLUSIVE_MODES
+                                         and self._calibration_synced())
+            result['calibration_synced']=self._calibration_synced()
             result['servo_scan_version'] = 1
             present = [i for i in range(15) if self.raw_mask & (1 << i) and self.servo_volt[i]]
             result['battery_v'] = min(self.servo_volt[i] for i in present) / 10 if present else None
