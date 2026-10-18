@@ -52,7 +52,10 @@ static const uint16_t ZERO_POS[NUM_MOTORS] = {
     2127, 2135, 1914, 2228, 2206,
     2550, 2060, 2128, 2034, 2190};
 
-// UNO Q hardware direction: all 15 motors are negative.
+// Default joint direction relative to the Microduck model the policies were trained on:
+// every joint negative on a correctly assembled UNO Q robot. A robot with a servo mounted
+// the other way round overrides this at runtime (CAL_SET_SIGNS from data/joint_signs.json,
+// set on the Check page).
 static const float MOTOR_SIGN[NUM_MOTORS] = {
     -1, -1, -1, -1, -1,
     -1, -1, -1, -1, -1,

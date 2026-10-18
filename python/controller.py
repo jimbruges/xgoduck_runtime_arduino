@@ -20,6 +20,8 @@ FACTORY_ZERO = [
     2550, 2060, 2128, 2034, 2190,
 ]
 ZERO_PATH = Path(__file__).resolve().parents[1] / 'data' / 'zero_pos.json'
+# Joints mounted the other way round from the trained model: direction +1 instead of -1.
+SIGNS_PATH = Path(__file__).resolve().parents[1] / 'data' / 'joint_signs.json'
 CAL_ZERO = 2048  # Finish re-centres each servo so its zero reads this (CAL_ZERO_POS)
 EXCLUSIVE_MODES = ('calibrate', 'servo_debug')
 PICK_PERIOD_S = 4.0
@@ -107,6 +109,9 @@ class Controller:
         self.servo_expected_reply = None
         self._zeros_pushed = False
         self._load_zeros()
+        self.sign_mask = self._load_signs()  # bit i: joint i uses direction +1
+        self.mcu_sign_mask = None
+        self._signs_sent = 0.0
 
     def _load_zeros(self):
         try:
@@ -127,6 +132,48 @@ class Controller:
             'saved_at': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
         }
         ZERO_PATH.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+
+    def _load_signs(self):
+        try:
+            ids = json.loads(SIGNS_PATH.read_text(encoding='utf-8'))['positive_ids']
+            return sum(1 << MOTOR_IDS.index(int(i)) for i in ids if int(i) in MOTOR_IDS)
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return 0
+
+    def _push_signs(self):
+        self.bridge.notify('duck_cal', encode_cal(CAL_SET_SIGNS, mask=self.sign_mask))
+        self._signs_sent = time.monotonic()
+
+    def set_joint_sign(self, motor_id, flipped):
+        motor_id = int(motor_id)
+        if motor_id not in MOTOR_IDS:
+            raise ValueError('unknown joint ID')
+        with self.lock:
+            if self.mode in ('hold', 'policy') or (self.feedback and self.feedback.enabled):
+                raise ValueError('turn torque off before changing a joint direction')
+            bit = 1 << MOTOR_IDS.index(motor_id)
+            self.sign_mask = (self.sign_mask | bit) if flipped else (self.sign_mask & ~bit)
+            self._save_signs()
+            self._push_signs()
+            return self.joint_signs()
+
+    def reset_joint_signs(self):
+        with self.lock:
+            if self.mode in ('hold', 'policy') or (self.feedback and self.feedback.enabled):
+                raise ValueError('turn torque off before changing joint directions')
+            self.sign_mask = 0
+            self._save_signs()
+            self._push_signs()
+            return self.joint_signs()
+
+    def _save_signs(self):
+        ids = [MOTOR_IDS[i] for i in range(15) if self.sign_mask & (1 << i)]
+        SIGNS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SIGNS_PATH.write_text(json.dumps({'positive_ids': ids}, indent=2), encoding='utf-8')
+
+    def joint_signs(self):
+        return {'flipped_ids': [MOTOR_IDS[i] for i in range(15) if self.sign_mask & (1 << i)],
+                'synced': self.mcu_sign_mask == self.sign_mask}
 
     def _push_zeros(self):
         self.bridge.notify('duck_cal', encode_cal(CAL_SET_ZEROS, mask=ALL_MASK, raw=self.zero_pos))
@@ -149,6 +196,10 @@ class Controller:
             self.raw_pos = pkt['pos']
             self.servo_volt, self.servo_temp = pkt['volt'], pkt['temp']
             self.raw_mask = pkt['mask']
+            self.mcu_sign_mask = pkt['pos_sign_mask']
+            # Directions live in MCU RAM: re-send after an MCU reset, or if a send was lost.
+            if self.mcu_sign_mask != self.sign_mask and time.monotonic()-self._signs_sent > 0.5:
+                self._push_signs()
             # After a push settles, trust MCU zeros; until then keep file values.
             if self._zeros_pushed:
                 self.zero_pos = pkt['zero']
@@ -834,6 +885,7 @@ class Controller:
             result['servo_temp'] = list(self.servo_temp)
             result['servo_temp_max'] = max((self.servo_temp[i] for i in present), default=None)
             result['tuning'] = dict(self.tuning)
+            result['joint_signs'] = self.joint_signs()
             result['pad'] = dict(self.pad_state, active=now-self.pad_time < PAD_ACTIVE_S,
                                  error=self.pad_error)
             result['deployment'] = dict(reference='rl/raspi_deploy', control_hz=50,

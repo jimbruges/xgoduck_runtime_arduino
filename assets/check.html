@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction check · XGO Duck</title><link rel="stylesheet" href="style.css">
+<main>
+<header>
+  <div><small>ARDUINO UNO Q</small><h1>Direction check</h1></div>
+  <div class="header-actions">
+    <nav class="nav"><a href="/">Control</a><a href="/calibrate.html">Calibration</a><a href="/check.html" aria-current="page">Check</a><a href="/servo.html">Servo setup</a><a href="/controller.html">Controller</a></nav>
+    <button class="stop" id="torque-off">Torque off</button>
+  </div>
+</header>
+<p id="message">Loading…</p>
+<section>
+  <h2>How to use</h2>
+  <p class="hint">Torque must be off: press <b>Torque off</b> first. For each row, hold the robot, press <b>Start</b>, then move only that joint (or the whole robot, for IMU rows) by about 20–30° in the direction described. The row turns green if the robot measures the motion with the sign the walk policy was trained with, and red if the sign is reversed. Directions come from the Microduck model the policies use (robot frame: x forward, y left, z up). "Left" and "right" are the robot's own.</p>
+  <p class="hint">A reversed joint means its servo is mounted the other way round. Press <b>Flip direction</b> on that row, then run the row again to confirm it turns green. Flips are saved on the robot in <code>data/joint_signs.json</code> and applied at every start; calibration zeros are unaffected. A reversed IMU row can't be fixed here; check how the board is mounted.</p>
+  <div class="buttons"><button id="reset-signs">Reset all directions</button><span class="hint" id="signs-state"></span></div>
+</section>
+<section>
+  <h2>IMU</h2>
+  <div id="imu" class="check-list"></div>
+</section>
+<section>
+  <h2>Joints</h2>
+  <div id="joints" class="check-list"></div>
+</section>
+</main>
+<script src="check.js"></script>
+</html>

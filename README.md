@@ -175,6 +175,34 @@ To shift an offset by hand instead, enter Servo setup and post `{"action": "writ
 | The shield resets or the battery cuts out | Do not power many joints at once. Calibration only powers the joints you drag, one at a time. Recharge the pack if it has been cutting out. |
 | Default pose does not stand | Check each joint against the renders with **Move all to zero**, and re-finish any that are off. |
 
+## Joint direction check
+
+A servo fitted the other way round still calibrates and can even hold Default pose: a hip pitch and ankle that are both reversed still give flat feet, just leaning the wrong way. The walk policy then gets mirrored feedback and falls within a step or two. The **Check** page (`/check.html`) finds this, with torque off.
+
+1. Open **Check** and press **Torque off**.
+2. For each IMU row, press **Start** and tilt or turn the whole robot as described. For each joint row, press **Start** and move only that joint 20–30° as described.
+3. A row turns green when the robot measures the motion with the sign the policies were trained with, and red ("reversed") when it is mirrored.
+4. On a red joint row press **Flip direction**, then run the row again to confirm it turns green.
+
+The expected directions come from the Microduck model the policies were trained on (robot frame x forward, y left, z up; "left" and "right" are the robot's own):
+
+| ID | Joint | Positive direction |
+| --- | --- | --- |
+| 10 / 20 | hip yaw | toes turn to the robot's right (left foot inward, right foot outward) |
+| 11 / 21 | hip roll | feet move to the robot's left (left foot outward, right foot inward) |
+| 12 / 22 | hip pitch | left foot swings backward, right foot swings forward |
+| 13 / 23 | knee | left foot moves forward, right foot moves backward |
+| 14 / 24 | ankle | left toe down, right toe up |
+| 30 / 31 | neck / head pitch | neck tilts back / head tips nose-down |
+| 32 / 33 | head yaw / roll | head turns left / left side goes down |
+| 34 | mouth | beak opens |
+
+IMU: nose-down gives positive gravity x; left side down gives positive gravity y. Turning left gives positive gyro z.
+
+Flips are stored on the robot in `data/joint_signs.json` (gitignored), as the list of IDs that use direction +1 instead of the firmware default of −1. The host sends them to the MCU at startup, re-sends them if the MCU reports anything different (for example after an MCU reset), and refuses changes while torque is on. Calibration zeros are raw encoder values, so flipping a direction does not invalidate them. **Reset all directions** returns every joint to the default. A reversed IMU row cannot be flipped here; check how the board is mounted.
+
+On the robot this fork was developed on, neck pitch (30) and head pitch (31) were reversed. Every other joint and the IMU matched.
+
 ## Running
 
 Pinned stack: App CLI with Arduino Zephyr core 1.0.0, RouterBridge 0.4.3, RPClite 0.3.1, MsgPack 0.4.2. `sketch/sketch.yaml` lists those libraries, including the transitive ones. Python packages are installed by the App build from `python/requirements.txt`.
@@ -374,6 +402,7 @@ data/zero_pos.json       Created on the robot by calibration (not in git)
 tools/                   Bridge patch, router rate, ELF check, read-only capture
 host/                    Bluetooth gamepad helper and its systemd user unit (runs on the host)
 data/controller.json     Controller mapping, saved from the Controller page (not in git)
+data/joint_signs.json    Joints mounted reversed, set on the Check page (not in git)
 data/tuning.json         Walk tuning (home pose, command smoothing, IMU level), saved from the Control page (not in git)
 FORK.md                  What this fork changes from upstream
 ```

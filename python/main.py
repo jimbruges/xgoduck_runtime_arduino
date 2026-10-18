@@ -97,6 +97,14 @@ def bt_action(action, timeout=5):
         return helper('/bt/'+action, body, timeout)
     return handler
 
+def joint_sign_set(body: dict):
+    try: return controller.set_joint_sign(body['id'], bool(body['flipped']))
+    except (KeyError, TypeError, ValueError) as exc: raise HTTPException(400, str(exc))
+
+def joint_sign_reset(_body: dict = None):
+    try: return controller.reset_joint_signs()
+    except ValueError as exc: raise HTTPException(400, str(exc))
+
 def tuning_set(body: dict):
     try: return controller.set_tuning(body)
     except (TypeError, ValueError) as exc: raise HTTPException(400, str(exc))
@@ -113,6 +121,8 @@ def pad_config_set(body: dict):
     except (TypeError, ValueError) as exc: raise HTTPException(400, str(exc))
 
 ui.expose_api('GET', '/api/status', controller.status)
+ui.expose_api('POST', '/api/joint_sign', joint_sign_set)
+ui.expose_api('POST', '/api/joint_sign/reset', joint_sign_reset)
 ui.expose_api('GET', '/api/tuning', controller.tuning_status)
 ui.expose_api('POST', '/api/tuning', tuning_set)
 ui.expose_api('POST', '/api/tuning/level', tuning_level)

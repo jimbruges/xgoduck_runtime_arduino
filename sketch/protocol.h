@@ -14,7 +14,8 @@ enum CalOp : uint8_t {
   CAL_EXIT = 1,
   CAL_SET_RAW = 2,
   CAL_FINISH_ONE = 3,
-  CAL_SET_ZEROS = 4
+  CAL_SET_ZEROS = 4,
+  CAL_SET_SIGNS = 5  // mask bit set = joint direction +1, clear = -1; ignored while armed
 };
 
 enum ServoOp : uint8_t {
@@ -66,6 +67,7 @@ struct __attribute__((packed)) RawPacket {
   uint16_t zero[15];
   uint8_t volt[15];  // supply voltage per servo, 0.1 V
   uint8_t temp[15];  // °C
+  uint16_t posSignMask;  // joints currently using direction +1
 };
 struct __attribute__((packed)) ServoReplyPacket {
   char magic[4];
@@ -77,5 +79,5 @@ static_assert(sizeof(CommandPacket) == 80, "Command ABI");
 static_assert(sizeof(StatePacket) == 240, "State ABI");
 static_assert(sizeof(CalPacket) == 38, "Cal ABI");
 static_assert(sizeof(ServoPacket) == 12, "Servo ABI");
-static_assert(sizeof(RawPacket) == 96, "Raw ABI");
+static_assert(sizeof(RawPacket) == 98, "Raw ABI");
 static_assert(sizeof(ServoReplyPacket) == 12, "Servo reply ABI");

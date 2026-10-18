@@ -7,12 +7,12 @@ STATE = struct.Struct('<4sBBH10I6h45f')
 COMMAND = struct.Struct('<4sIIIBBH15f')
 CAL = struct.Struct('<4sBBH15H')
 SERVO = struct.Struct('<4sBBBBBBH')
-RAW = struct.Struct('<4sH15H15H15B15B')
+RAW = struct.Struct('<4sH15H15H15B15BH')
 SERVO_REPLY = struct.Struct('<4sBBBBHH')
 ALL_MASK = 0x7fff  # hardware order: 10..14,20..24,30..34
 DISARM, ARM, POLICY, HOLD = range(4)
 
-CAL_ENTER, CAL_EXIT, CAL_SET_RAW, CAL_FINISH_ONE, CAL_SET_ZEROS = range(5)
+CAL_ENTER, CAL_EXIT, CAL_SET_RAW, CAL_FINISH_ONE, CAL_SET_ZEROS, CAL_SET_SIGNS = range(6)
 SERVO_ENTER, SERVO_EXIT, SERVO_UNLOCK, SERVO_SET_ID, SERVO_GOTO, SERVO_SET_PERM_KP_KD, SERVO_READ = range(7)
 SERVO_PING, SERVO_SET_MIDDLE, SERVO_READ_REG, SERVO_WRITE_LIMIT = 7, 8, 9, 10
 ADDR_MIN_ANGLE, ADDR_MAX_ANGLE, ADDR_POS_OFFSET = 9, 11, 31
@@ -21,7 +21,7 @@ assert STATE.size == 240
 assert COMMAND.size == 80
 assert CAL.size == 38
 assert SERVO.size == 12
-assert RAW.size == 96
+assert RAW.size == 98
 assert SERVO_REPLY.size == 12
 
 @dataclass(frozen=True)
@@ -83,7 +83,7 @@ def encode_command(seq, sample_us, mode, targets, ttl_us=250000):
                         ttl_us, mode, 0, 0, *targets)
 
 def encode_cal(op, index=0, mask=ALL_MASK, raw=None):
-    if op not in range(5):
+    if op not in range(6):
         raise ValueError('invalid cal op')
     values = list(raw or [0] * 15)
     if len(values) != 15:
@@ -106,12 +106,12 @@ def encode_servo(op, target_id, new_id=0, kp=5, kd=20, raw_pos=2047):
 
 def decode_raw(data):
     if not isinstance(data, (bytes, bytearray)) or len(data) != RAW.size:
-        raise ValueError('expected 96-byte raw')
+        raise ValueError('expected 98-byte raw')
     x = RAW.unpack(data)
     if x[0] != b'DQR2' or x[1] & ~ALL_MASK:
         raise ValueError('invalid raw ABI')
     return {'mask': x[1], 'pos': list(x[2:17]), 'zero': list(x[17:32]),
-            'volt': list(x[32:47]), 'temp': list(x[47:62])}
+            'volt': list(x[32:47]), 'temp': list(x[47:62]), 'pos_sign_mask': x[62]}
 
 def decode_servo_reply(data):
     if not isinstance(data, (bytes, bytearray)) or len(data) != SERVO_REPLY.size:

@@ -56,7 +56,7 @@ static void receiveCal(MsgPack::bin_t<uint8_t> bytes) {
   bool valid = bytes.size() == sizeof(pkt);
   if (valid) {
     memcpy(&pkt, bytes.data(), sizeof(pkt));
-    valid = memcmp(pkt.magic, "DQL1", 4) == 0 && pkt.op <= CAL_SET_ZEROS;
+    valid = memcmp(pkt.magic, "DQL1", 4) == 0 && pkt.op <= CAL_SET_SIGNS;
     if (pkt.op == CAL_FINISH_ONE) valid = valid && pkt.index < NUM_MOTORS;
     if (pkt.op == CAL_SET_RAW || pkt.op == CAL_SET_ZEROS) {
       for (unsigned i = 0; i < NUM_MOTORS; ++i) {
@@ -103,6 +103,7 @@ static void fillRawPacket(RawPacket &r) {
     r.zero[i] = motors[i].zeroPos;
     r.volt[i] = motors[i].fbVolt;
     r.temp[i] = motors[i].fbTemp;
+    if (motors[i].sign > 0) r.posSignMask |= 1u << i;
   }
   k_mutex_unlock(&motorsMu);
 }
@@ -143,6 +144,18 @@ static void applyCalOp(const CalPacket &pkt) {
       }
       k_mutex_unlock(&motorsMu);
       break;
+    case CAL_SET_SIGNS: {
+      // Flipping a direction under position control would mirror the joint's target.
+      k_mutex_lock(&stateMu, K_FOREVER);
+      const bool armed = snapshot.flags & 2;
+      k_mutex_unlock(&stateMu);
+      if (armed) break;
+      k_mutex_lock(&motorsMu, K_FOREVER);
+      for (unsigned i = 0; i < NUM_MOTORS; ++i)
+        motors[i].sign = (pkt.mask & (1u << i)) ? 1.0f : -1.0f;
+      k_mutex_unlock(&motorsMu);
+      break;
+    }
   }
 }
 

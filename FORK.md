@@ -80,6 +80,10 @@ A **Walk tuning** section on the Control page, saved in `data/tuning.json`:
 - **IMU level:** measures and cancels the IMU's mounting roll and pitch while the robot stands level. It replaces the hard-coded `IMU_BIAS_DEG`, which was zero.
 - **Battery and temperature:** the MCU's per-tick servo status read is extended from 6 to 8 bytes (adding voltage and temperature, registers 62–63). They travel in the raw packet (`DQR2`, 96 bytes), and the page shows the lowest servo voltage and the hottest servo.
 
+## Joint direction check
+
+A **Check** page tests every joint's direction and the IMU axes against the Microduck model the policies were trained on, with torque off. Upstream hard-codes direction −1 for all 15 servos. Here a reversed joint is fixed with **Flip direction**, saved in `data/joint_signs.json`, and applied by the MCU at runtime: a new `CAL_SET_SIGNS` message, ignored while armed. The MCU echoes the active directions in the raw packet (`posSignMask`, which grows the packet to 98 bytes), and the host re-sends them whenever they differ. On the development robot, neck pitch and head pitch were reversed. That fits the walk failing within two steps, because the policy moves the heavy head to balance.
+
 ## Notes from bring-up
 
 These are observations from one robot, not guarantees:
