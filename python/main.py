@@ -125,6 +125,7 @@ def pad_config_set(body: dict):
 
 ui.expose_api('GET', '/api/status', controller.status)
 ui.expose_api('GET', '/api/log', controller.flight_log)
+ui.expose_api('GET', '/api/log/summary', controller.flight_summary)
 ui.expose_api('POST', '/api/log/clear', log_clear)
 ui.expose_api('POST', '/api/joint_sign', joint_sign_set)
 ui.expose_api('POST', '/api/joint_sign/reset', joint_sign_reset)

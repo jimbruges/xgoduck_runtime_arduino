@@ -13,7 +13,12 @@ DEFAULTS = {
     'cmd_tau_s': 0.0,
     # IMU mounting tilt (roll, pitch, yaw) cancelled before the gravity filter, degrees.
     'imu_bias_deg': [0.0, 0.0, 0.0],
+    # Servo run gains for Default pose and Walk (temporary KP/KD registers 50/51).
+    # Firmware defaults are KP 6, KD 20; higher KP is stiffer, lower KD is quicker.
+    'servo_kp': 6,
+    'servo_kd': 20,
 }
+MOUTH_KP = 10  # mouth servo run KP, as in firmware
 
 
 def validate(values, base=None):
@@ -28,6 +33,16 @@ def validate(values, base=None):
         if not math.isfinite(tau) or not 0 <= tau <= 1.0:
             raise ValueError('cmd_tau_s must be within 0..1 s')
         out['cmd_tau_s'] = tau
+    if 'servo_kp' in values:
+        kp = int(values['servo_kp'])
+        if not 1 <= kp <= 32:
+            raise ValueError('servo KP must be within 1..32')
+        out['servo_kp'] = kp
+    if 'servo_kd' in values:
+        kd = int(values['servo_kd'])
+        if not 0 <= kd <= 40:
+            raise ValueError('servo KD must be within 0..40')
+        out['servo_kd'] = kd
     if 'imu_bias_deg' in values:
         bias = [float(v) for v in values['imu_bias_deg']]
         if len(bias) != 3 or any(not math.isfinite(v) or abs(v) > 30 for v in bias):

@@ -13,6 +13,7 @@ from rl_core import MOTOR_IDS, HOME_DEG, DEFAULT_DEG, GRAVITY_TAU, MOUTH_INDEX, 
 from wire import *
 import pad
 import tuning
+import flight
 
 FACTORY_ZERO = [
     2236, 2005, 1912, 1866, 1945,
@@ -118,6 +119,8 @@ class Controller:
         self.sign_mask = self._load_signs()  # bit i: joint i uses direction +1
         self.mcu_sign_mask = None
         self._signs_sent = 0.0
+        self.mcu_gains = None
+        self._gains_sent = 0.0
 
     def _load_zeros(self):
         try:
@@ -186,6 +189,15 @@ class Controller:
         self._zeros_pushed = True
         self._zeros_sent = time.monotonic()
 
+    def _push_gains(self):
+        t = self.tuning
+        self.bridge.notify('duck_cal', encode_cal(CAL_SET_GAINS, mask=0,
+                           raw=[t['servo_kp'], t['servo_kd'], tuning.MOUTH_KP] + [0]*12))
+        self._gains_sent = time.monotonic()
+
+    def _gains_synced(self):
+        return self.mcu_gains == (self.tuning['servo_kp'], self.tuning['servo_kd'])
+
     def _calibration_synced(self):
         return self.zero_pos == self.zero_target and self.mcu_sign_mask == self.sign_mask
 
@@ -206,6 +218,7 @@ class Controller:
             self.raw_mask = pkt['mask']
             self.mcu_sign_mask = pkt['pos_sign_mask']
             self.zero_pos = pkt['zero']
+            self.mcu_gains = (pkt['run_kp'], pkt['run_kd'])
             # Zeros and directions live in MCU RAM: re-send after an MCU reset or a lost
             # message. The MCU holds one pending calibration message, so send at most one
             # per packet: a second would overwrite the first before the MCU reads it.
@@ -215,8 +228,11 @@ class Controller:
             elif self.zero_pos != self.zero_target:
                 if now-self._zeros_sent > 0.5:
                     self._push_zeros()
-            elif self.mcu_sign_mask != self.sign_mask and now-self._signs_sent > 0.5:
-                self._push_signs()
+            elif self.mcu_sign_mask != self.sign_mask:
+                if now-self._signs_sent > 0.5:
+                    self._push_signs()
+            elif not self._gains_synced() and now-self._gains_sent > 0.5:
+                self._push_gains()
 
     def receive_servo_reply(self, raw):
         try:
@@ -345,9 +361,13 @@ class Controller:
                     and self.mode == 'policy':
                 raise ValueError('switch the home pose while not walking')
             new = tuning.validate(values, self.tuning)
+            gains_changed = (new['servo_kp'], new['servo_kd']) != \
+                (self.tuning['servo_kp'], self.tuning['servo_kd'])
             with self.policy_lock:
                 self.tuning = new
                 self._apply_tuning()
+            if gains_changed:
+                self._push_gains()
                 for p in self._policies():
                     p.reset_action_filter()
             self.policy_needs_reset = True
@@ -394,6 +414,13 @@ class Controller:
     def flight_log(self):
         with self.lock:
             return {'fields': self.FLIGHT_FIELDS, 'motors': MOTOR_IDS, 'samples': list(self.flight)}
+
+    def flight_summary(self):
+        with self.lock:
+            samples = list(self.flight)
+        result = flight.summarize(samples)
+        result['gains'] = {'kp': self.tuning['servo_kp'], 'kd': self.tuning['servo_kd']}
+        return result
 
     def flight_clear(self):
         with self.lock:
@@ -935,6 +962,8 @@ class Controller:
             result['servo_temp_max'] = max((self.servo_temp[i] for i in present), default=None)
             result['tuning'] = dict(self.tuning)
             result['joint_signs'] = self.joint_signs()
+            result['servo_gains'] = {'kp': self.tuning['servo_kp'], 'kd': self.tuning['servo_kd'],
+                                     'mcu': self.mcu_gains, 'synced': self._gains_synced()}
             result['pad'] = dict(self.pad_state, active=now-self.pad_time < PAD_ACTIVE_S,
                                  error=self.pad_error)
             result['deployment'] = dict(reference='rl/raspi_deploy', control_hz=50,

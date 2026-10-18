@@ -100,9 +100,12 @@ static void setTempKpKd(uint8_t kp, uint8_t kd) {
   Serial1.flush();
 }
 
+// Run gains for position control; the host can change them (CAL_SET_GAINS, Walk tuning).
+static uint8_t runKp = TEMP_KP_RUN, runKd = TEMP_KD_RUN, runKpMouth = TEMP_KP_MOUTH;
+
 static void setRunKpKd() {
-  setTempKpKd(TEMP_KP_RUN, TEMP_KD_RUN);
-  scsWriteByte(MOUTH_MOTOR_ID, ADDR_TEMP_KP, TEMP_KP_MOUTH);
+  setTempKpKd(runKp, runKd);
+  scsWriteByte(MOUTH_MOTOR_ID, ADDR_TEMP_KP, runKpMouth);
   Serial1.flush();
 }
 

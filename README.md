@@ -256,6 +256,11 @@ The **Walk tuning** section of the Control page holds settings for A/B testing h
 | Command smoothing | off | A first-order low-pass on the walk and head commands, as a time constant (0–0.5 s). Stick and key steps reach the policy as ramps. Upstream Microduck smooths commands the same way. |
 | IMU level | 0°, 0° | The IMU's mounting roll and pitch, cancelled before the gravity filter. With torque off, hold the robot so its **body** is level: a spirit level (or phone level app) on the body's flat top should read level front-to-back and side-to-side. Keep it still and press **Level IMU**. It averages the accelerometer for 1 s and refuses if the robot moves, isn't at ~1 g, or is tilted more than 30°. **Reset** clears it. Don't level in Default pose: the head's weight and servo sag can tilt the body a few degrees, and levelling would hide that real lean. On the development robot that gave −5.4° and made it fall backwards. |
 
+| Servo KP | 6 | Proportional gain of every joint servo in Default pose and Walk (the servos' temporary KP register, 50). Higher follows the policy more closely; too high buzzes, oscillates or runs hot. Applied live and confirmed on the MCU. |
+| Servo KD | 20 | Derivative gain (register 51). Lower responds faster but can overshoot; upstream Microduck runs its servos with none. |
+
+**Last walk** summarises the flight recorder for the most recent Walk run. For each command type (forward, backward, turn, still) it shows the **follow ratio**, how much of each commanded leg swing the servos achieved (1.0 = all of it), and the delay. It also shows any fall and the resting body pitch. On the development robot at KP 6 / KD 20, legs followed about 0.46 forward and 0.40 backward, roughly 85 ms late. The policy then over-corrects and walking backward falls. To tune: **Clear**, walk the same sequence, **Refresh**, then change one gain in small steps and repeat, watching the servo temperatures in the header.
+
 The section header shows the **battery** voltage (the lowest servo supply reading, register 62) and the hottest servo temperature (register 63). They are read with the 100 Hz status and reported at 5 Hz. The policies were trained with supply voltages of roughly 6.5–8.2 V, so torque and walking degrade as the pack runs down; it turns amber below 7.0 V.
 
 ### Why these three

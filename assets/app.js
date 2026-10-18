@@ -98,6 +98,9 @@ function renderTuning(s){
   document.querySelectorAll('[data-home]').forEach(x=>x.classList.toggle('active',x.dataset.home===t.home_source));
   if(document.activeElement!==$('cmd-tau')){$('cmd-tau').value=t.cmd_tau_s;$('cmd-tau-v').textContent=t.cmd_tau_s?t.cmd_tau_s.toFixed(2)+' s':'off';}
   $('imu-bias').textContent=`roll ${t.imu_bias_deg[0].toFixed(1)}° · pitch ${t.imu_bias_deg[1].toFixed(1)}°`;
+  const g=s.servo_gains;
+  if(g){for(const k of ['kp','kd'])if(document.activeElement!==$('servo-'+k)){$('servo-'+k).value=g[k];$(`servo-${k}-v`).textContent=g[k];}
+    $('gain-state').textContent=g.synced?'· applied':'· applying…';}
   const h=s.deployment&&s.deployment.home_deg;if(h)$('home-detail').textContent=`walk home now: hip pitch ${h[2].toFixed(1)}° / ankle ${h[4].toFixed(1)}° · knee ${h[3].toFixed(2)}°`;
 }
 async function setTuning(body,label){
@@ -114,3 +117,21 @@ $('level-imu').onclick=async()=>{
   catch(e){showError(e);}finally{tuneBusy=false;}
 };
 $('reset-imu').onclick=()=>setTuning({imu_bias_deg:[0,0,0]},'IMU level reset');
+
+['kp','kd'].forEach(k=>{
+  $('servo-'+k).oninput=()=>{$(`servo-${k}-v`).textContent=$('servo-'+k).value;};
+  $('servo-'+k).onchange=()=>setTuning({['servo_'+k]:+$('servo-'+k).value},`Servo ${k.toUpperCase()} set to ${$('servo-'+k).value}`);
+});
+async function refreshWalk(){
+  try{
+    const r=await (await fetch('/api/log/summary')).json();
+    if(!r.walk){$('walk-summary').textContent='No walk recorded yet.';return;}
+    const rows=['forward','backward','turn','still'].filter(k=>r.groups[k]).map(k=>{const x=r.groups[k];
+      return `<tr><td>${k}</td><td>${x.legs_ratio??'—'}</td><td>${x.legs_lag_ms??'—'} ms</td><td>${k==='still'?'':x.peak_vx}</td></tr>`;}).join('');
+    $('walk-summary').innerHTML=`<p>KP ${r.gains.kp} · KD ${r.gains.kd} · ${r.seconds} s${r.fell_at_s!=null?` · <b class="warn-text">fell at ${r.fell_at_s} s</b>`:' · no fall'}${r.still_pitch_deg!=null?` · resting pitch ${r.still_pitch_deg}°`:''}</p>
+      <table><thead><tr><th>command</th><th>follow</th><th>lag</th><th>peak vx</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }catch(e){$('walk-summary').textContent=e.message;}
+}
+$('walk-refresh').onclick=refreshWalk;
+$('walk-clear').onclick=async()=>{try{await post('log/clear',{});$('walk-summary').textContent='Cleared. Walk, then Refresh.';}catch(e){showError(e);}};
+refreshWalk();

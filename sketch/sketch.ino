@@ -56,7 +56,10 @@ static void receiveCal(MsgPack::bin_t<uint8_t> bytes) {
   bool valid = bytes.size() == sizeof(pkt);
   if (valid) {
     memcpy(&pkt, bytes.data(), sizeof(pkt));
-    valid = memcmp(pkt.magic, "DQL1", 4) == 0 && pkt.op <= CAL_SET_SIGNS;
+    valid = memcmp(pkt.magic, "DQL1", 4) == 0 && pkt.op <= CAL_SET_GAINS;
+    if (pkt.op == CAL_SET_GAINS)
+      valid = valid && pkt.raw[0] >= 1 && pkt.raw[0] <= 64 && pkt.raw[1] <= 100 &&
+              pkt.raw[2] >= 1 && pkt.raw[2] <= 64;
     if (pkt.op == CAL_FINISH_ONE) valid = valid && pkt.index < NUM_MOTORS;
     if (pkt.op == CAL_SET_RAW || pkt.op == CAL_SET_ZEROS) {
       for (unsigned i = 0; i < NUM_MOTORS; ++i) {
@@ -105,6 +108,8 @@ static void fillRawPacket(RawPacket &r) {
     r.temp[i] = motors[i].fbTemp;
     if (motors[i].sign > 0) r.posSignMask |= 1u << i;
   }
+  r.runKp = runKp;
+  r.runKd = runKd;
   k_mutex_unlock(&motorsMu);
 }
 
@@ -143,6 +148,13 @@ static void applyCalOp(const CalPacket &pkt) {
         if (pkt.mask & (1u << i)) motors[i].zeroPos = satPos(pkt.raw[i]);
       }
       k_mutex_unlock(&motorsMu);
+      break;
+    case CAL_SET_GAINS:
+      runKp = (uint8_t)pkt.raw[0];
+      runKd = (uint8_t)pkt.raw[1];
+      runKpMouth = (uint8_t)pkt.raw[2];
+      // Calibration and servo setup use their own gains and restore these on exit.
+      if (hostMode == HOST_NORMAL) setRunKpKd();
       break;
     case CAL_SET_SIGNS: {
       // Flipping a direction under position control would mirror the joint's target.

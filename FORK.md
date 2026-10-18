@@ -92,6 +92,10 @@ Upstream marks the IMU healthy on any successful I2C read. After a shield browno
 
 The host now confirms the saved zeros and joint directions on the MCU, resending them after an MCU reset or a lost message. It sends one calibration message at a time, because the MCU holds only one. Default pose and Walk wait until both are confirmed. A flight recorder keeps the last 20 s of tilt, gyro, joint targets and measured angles while position control is on (`GET /api/log`).
 
+## Adjustable servo gains and walk summary
+
+The run gains (servo temporary KP/KD, registers 50/51) were firmware constants (6/20). They are now Walk tuning settings saved in `data/tuning.json`. A new `CAL_SET_GAINS` message applies them live, the MCU echoes the gains in use (the raw packet is now 100 bytes), and the host resends them on mismatch. The flight recorder gains a summary (`GET /api/log/summary`, shown as **Last walk**): per command type, the legs' follow ratio (achieved over commanded swing) and lag. It measured about 0.4–0.46 at 85 ms on the development robot at the default gains.
+
 ## Notes from bring-up
 
 These are observations from one robot, not guarantees:
