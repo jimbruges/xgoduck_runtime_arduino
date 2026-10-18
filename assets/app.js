@@ -128,10 +128,11 @@ async function refreshWalk(){
     if(!r.walk){$('walk-summary').textContent='No walk recorded yet.';return;}
     const rows=['forward','backward','turn','still'].filter(k=>r.groups[k]).map(k=>{const x=r.groups[k];
       return `<tr><td>${k}</td><td>${x.legs_ratio??'—'}</td><td>${x.legs_lag_ms??'—'} ms</td><td>${k==='still'?'':x.peak_vx}</td></tr>`;}).join('');
-    $('walk-summary').innerHTML=`<p>KP ${r.gains.kp} · KD ${r.gains.kd} · ${r.seconds} s${r.fell_at_s!=null?` · <b class="warn-text">fell at ${r.fell_at_s} s</b>`:' · no fall'}${r.still_pitch_deg!=null?` · resting pitch ${r.still_pitch_deg}°`:''}</p>
+    $('walk-summary').innerHTML=`<p>KP ${r.gains.kp} · KD ${r.gains.kd} · ${r.seconds} s walking in the last ${r.window_s} s${r.falls?` · <b class="warn-text">${r.falls} fall${r.falls>1?'s':''}</b>`:' · no falls'}${r.still_pitch_deg!=null?` · resting pitch ${r.still_pitch_deg}°`:''}</p>
       <table><thead><tr><th>command</th><th>follow</th><th>lag</th><th>peak vx</th></tr></thead><tbody>${rows}</tbody></table>`;
   }catch(e){$('walk-summary').textContent=e.message;}
 }
 $('walk-refresh').onclick=refreshWalk;
 $('walk-clear').onclick=async()=>{try{await post('log/clear',{});$('walk-summary').textContent='Cleared. Walk, then Refresh.';}catch(e){showError(e);}};
 refreshWalk();
+setInterval(()=>{if(!document.hidden)refreshWalk();},2000);

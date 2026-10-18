@@ -31,41 +31,63 @@ def _follow(G, j):
     return (max(an) - min(an)) / tp, lag * TICK_MS
 
 
+def _runs(samples):
+    """Split Walk (policy-mode) samples into contiguous runs."""
+    runs, cur = [], []
+    for s in samples:
+        if s[1] == 'policy' and cur and s[0] - cur[-1][0] < 0.2:
+            cur.append(s)
+        else:
+            if cur:
+                runs.append(cur)
+            cur = [s] if s[1] == 'policy' else []
+    if cur:
+        runs.append(cur)
+    return runs
+
+
 def summarize(samples):
-    """Last contiguous Walk run: fall, resting pitch, and per-command follow ratio and lag.
+    """All Walk time in the recorder: falls, resting pitch, per-command follow ratio and lag.
 
     Follow ratio is the achieved swing over the commanded swing of each joint; 1.0 means the
-    servo reaches what the policy asks. Only upright samples in the walk phase are counted.
+    servo reaches what the policy asks. Only upright samples in the walk phase are counted,
+    and lag is fitted within each contiguous run.
     """
-    idx = [i for i, s in enumerate(samples) if s[1] == 'policy']
-    if not idx:
+    runs = _runs(samples)
+    if not runs:
         return {'walk': False}
-    end = idx[-1]
-    start = end
-    while start > 0 and samples[start - 1][1] == 'policy' and \
-            samples[start][0] - samples[start - 1][0] < 0.2:
-        start -= 1
-    W = samples[start:end + 1]
-    t0 = W[0][0]
-    fell = next((s for s in W if s[2] != 'walk'), None)
-    up = [s for s in W if s[2] == 'walk' and abs(_pitch(s)) < 20]
+    W = [s for r in runs for s in r]
+    falls = [r[next(i for i, s in enumerate(r) if s[2] != 'walk')][0] - samples[0][0]
+             for r in runs if any(s[2] != 'walk' for s in r)]
+    # Contiguous stretches of one command type while upright, each at least 0.3 s.
     groups = {}
-    for s in up:
-        groups.setdefault(_group(s), []).append(s)
-    out = {'walk': True, 'seconds': round(W[-1][0] - t0, 1),
-           'fell_at_s': round(fell[0] - t0, 2) if fell else None,
+    for r in runs:
+        stretch, label = [], None
+        for s in r + [None]:
+            name = _group(s) if s and s[2] == 'walk' and abs(_pitch(s)) < 20 else None
+            if name != label or s is None:
+                if label and len(stretch) >= 15:
+                    groups.setdefault(label, []).append(stretch)
+                stretch, label = [], name
+            if name:
+                stretch.append(s)
+    out = {'walk': True, 'seconds': round(len(W) * TICK_MS / 1000, 1), 'runs': len(runs),
+           'falls': len(falls), 'window_s': round(samples[-1][0] - samples[0][0], 1),
            'groups': {}}
-    still = groups.get('still', [])
+    still = [s for G in groups.get('still', []) for s in G]
     if still:
         out['still_pitch_deg'] = round(sum(map(_pitch, still)) / len(still), 1)
-    for name, G in groups.items():
-        if len(G) < 15:
-            continue
+    for name, chunks in groups.items():
+        G = [s for c in chunks for s in c]
         joints = {}
         for j, label in enumerate(JOINTS):
-            ratio, lag = _follow(G, j)
-            if ratio is not None:
-                joints[label] = {'ratio': round(ratio, 2), 'lag_ms': lag}
+            # Tick-weighted average over the chunks, so lag is never fitted across a gap.
+            parts = [(len(c), *_follow(c, j)) for c in chunks]
+            parts = [p for p in parts if p[1] is not None]
+            if parts:
+                n = sum(p[0] for p in parts)
+                joints[label] = {'ratio': round(sum(p[0] * p[1] for p in parts) / n, 2),
+                                 'lag_ms': round(sum(p[0] * p[2] for p in parts) / n)}
         legs = [joints[JOINTS[j]] for j in LEGS if JOINTS[j] in joints]
         out['groups'][name] = {
             'ticks': len(G),
