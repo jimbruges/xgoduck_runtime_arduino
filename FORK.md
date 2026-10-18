@@ -4,6 +4,20 @@ Based on [LuwuDynamics/xgoduck_runtime_arduino](https://github.com/LuwuDynamics/
 
 The changes come from bringing up an assembled XGO Duck, where the upstream calibration flow tripped the battery and several joints could not be calibrated or reach the Default pose.
 
+## Walking: what was wrong and what this fork changes
+
+Getting the robot to walk uncovered five problems. Each has a fix or a setting, and each setting on the Control page explains itself (**What / Why / Tune**). The README's *Walk tuning* section has the full evidence.
+
+| Problem found | Evidence | What this fork does |
+| --- | --- | --- |
+| Neck pitch and head pitch mounted reversed | The Check page showed them mirrored against the model the policies were trained on; every other joint and the IMU matched | Per-robot joint directions, set on the **Check** page |
+| Calibration zeros lost at startup | The MCU kept factory zeros; a second calibration message overwrote the first before the MCU read it | The host resends zeros and directions until the MCU confirms; Walk waits for that |
+| IMU dead after a shield brownout | The accelerometer read exactly zero while the IMU reported OK, so the policy walked blind | The firmware re-initialises the sensor; the host refuses zero IMU data |
+| Servos follow about 40–50% of each commanded swing, about 85 ms late | Flight recorder (**Last walk**); training assumed a 4 ms delay and P = 5 | Adjustable servo KP/KD, plus the follow-ratio summary to tune them |
+| Centre of mass about 7–11 mm behind the trained one | The XGO training model has no Uno Q, shield or battery at the back; backward walking needed 9–10° of lean | Home lean, with a separate backward value, as a stop-gap; the real fixes are moving the battery forward or retraining |
+
+Also: the home pose now follows each model's training metadata (20°, not the hand-tuned 23°); the IMU is levelled against a spirit level (about 4° board tilt); and command smoothing is available. The controller, calibration and setup tools below support all of this.
+
 ## Calibration no longer starts every servo at once
 
 Upstream, **Start calibration** enabled torque on all 15 servos and sent each one straight to raw 2047 from wherever it was. On an assembled robot the combined inrush tripped the 8.4 V pack and reset the shield.
@@ -73,12 +87,13 @@ Upstream, the four head channels only feed the walk policy, so in Default pose t
 
 ## Walk tuning and battery readout
 
-A **Walk tuning** section on the Control page, saved in `data/tuning.json`:
+A **Walk tuning** section on the Control page, saved in `data/tuning.json`. Every setting carries its own What / Why / Tune explanation on the page. The settings are:
 
 - **Home pose: Table or Model.** Upstream uses one hand-tuned home (hip/ankle 23°) for every policy. The models' own `default_joint_pos` metadata says walk, get-up and pick were trained around 20° and roulade around 24°. **Model** uses each policy's trained home for observations and actions. Default: Table (upstream behaviour).
 - **Command smoothing:** an optional low-pass on walk and head commands.
 - **IMU level:** measures and cancels the IMU's mounting roll and pitch, with the body held level against a spirit level. Levelling in Default pose hid a real backward lean on the development robot. It replaces the hard-coded `IMU_BIAS_DEG`, which was zero.
-- **Battery and temperature:** the MCU's per-tick servo status read is extended from 6 to 8 bytes (adding voltage and temperature, registers 62–63). They travel in the raw packet (`DQR2`, 96 bytes), and the page shows the lowest servo voltage and the hottest servo.
+- **Home lean** (standing/forward and backward values, blended by the backward command and slewed at 20°/s): moves the body forward over the feet to compensate the rearward centre of mass.
+- **Battery and temperature** (amber below the training's 7.4 V minimum): the MCU's per-tick servo status read is extended from 6 to 8 bytes (adding voltage and temperature, registers 62–63). They travel in the raw packet (`DQR2`, 96 bytes), and the page shows the lowest servo voltage and the hottest servo.
 
 ## Joint direction check
 

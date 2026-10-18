@@ -248,38 +248,76 @@ Walk commands are vx ±0.4, vy ±0.3, ωz ±1.0, with a joystick dead zone of 0.
 
 ## Walk tuning
 
-The **Walk tuning** section of the Control page holds settings for A/B testing how well the policies transfer to the robot. Changes apply immediately and are saved on the robot in `data/tuning.json` (gitignored). The defaults reproduce upstream behaviour.
+The **Walk tuning** section of the Control page matches this robot to the walking policy. Every setting is saved on the robot in `data/tuning.json` (gitignored) and applied immediately. The defaults reproduce the original runtime. Each setting is explained on the page as **What / Why / Tune**, and the same explanations are below. Change one thing at a time and compare the **Last walk** numbers.
 
-| Setting | Default | What it does |
-| --- | --- | --- |
-| Home pose | Table | The pose that observations are measured from and that actions are added to. **Table** is the hand-tuned `HOME_DEG` (hip pitch and ankle ±23°, knee 0°) for every policy. **Model** uses each ONNX policy's own `default_joint_pos` metadata: walk, get-up and pick were trained around ±20° (knee ∓0.29°), roulade around ±24°. Switch only while not walking. |
-| Command smoothing | off | A first-order low-pass on the walk and head commands, as a time constant (0–0.5 s). Stick and key steps reach the policy as ramps. Upstream Microduck smooths commands the same way. |
-| IMU level | 0°, 0° | The IMU's mounting roll and pitch, cancelled before the gravity filter. With torque off, hold the robot so its **body** is level: a spirit level (or phone level app) on the body's flat top should read level front-to-back and side-to-side. Keep it still and press **Level IMU**. It averages the accelerometer for 1 s and refuses if the robot moves, isn't at ~1 g, or is tilted more than 30°. **Reset** clears it. Don't level in Default pose: the head's weight and servo sag can tilt the body a few degrees, and levelling would hide that real lean. On the development robot that gave −5.4° and made it fall backwards. |
+### Battery and temperature
 
-| Home lean, walking backward | 0° | The lean used when walking backward. The applied lean blends from **Home lean** (standing and forward) to this value as vx goes from 0 to −0.2, and changes at most 20°/s. On the development robot, backward walking needed about 9–10° while forward walking became unstable at that lean. |
-| Home lean | 0° | Stands the hip pitch and ankle home angles this many degrees more upright, in every policy's home and in Default pose. That moves the body forward over the feet by about 1.3 mm per degree, to compensate for a centre of mass behind the trained one. The XGO training model does not place the battery and Uno Q at the back, which puts the real CoM an estimated 7–11 mm behind. Change it while not walking. |
-| Servo KP | 6 | Proportional gain of every joint servo in Default pose and Walk (the servos' temporary KP register, 50). Higher follows the policy more closely; too high buzzes, oscillates or runs hot. Applied live and confirmed on the MCU. |
-| Servo KD | 20 | Derivative gain (register 51). Lower responds faster but can overshoot; upstream Microduck runs its servos with none. |
+The section header shows the lowest servo supply voltage (register 62) and the hottest servo temperature (register 63). They are read with the 100 Hz status and reported at 5 Hz.
 
-**Last walk** summarises the flight recorder for the most recent Walk run. For each command type (forward, backward, turn, still) it shows the **follow ratio**, how much of each commanded leg swing the servos achieved (1.0 = all of it), and the delay. It also shows any fall and the resting body pitch. On the development robot at KP 6 / KD 20, legs followed about 0.46 forward and 0.40 backward, roughly 85 ms late. The policy then over-corrects and walking backward falls. To tune: **Clear**, walk the same sequence, **Refresh**, then change one gain in small steps and repeat, watching the servo temperatures in the header.
+- **Why:** the XGO policies were trained with a 7.4–8.0 V supply (`xgoduck_rl/.../xgoduck_constants.py`, `vin_range`). Below that, servo torque, and with it walking, degrades. A flat pack also caused shield brownouts on the development robot, which reset the IMU.
+- **Tune:** the readout turns amber below 7.4 V; charge before testing.
 
-The section header shows the **battery** voltage (the lowest servo supply reading, register 62) and the hottest servo temperature (register 63). They are read with the 100 Hz status and reported at 5 Hz. The policies were trained with supply voltages of roughly 6.5–8.2 V, so torque and walking degrade as the pack runs down; it turns amber below 7.0 V.
+### Home pose (Table / Model)
 
-### Why these three
+- **What:** the joint pose the policy measures its observations from and adds its actions to.
+- **Why:** each ONNX model records the home it was trained around (`default_joint_pos`): walk, get-up and pick were trained at 20° hip pitch and ankle, roulade at 24°. The original runtime used one hand-tuned 23° (`HOME_DEG`) for all of them, so walk saw its hips and ankles 3° off. **Model** uses each policy's own trained home.
+- **Tune:** prefer **Model**. Switch only while not walking.
 
-- **Home pose:** the policies' metadata says walk, get-up and pick were trained around 20°, but the runtime uses 23° for all of them (upstream started at 24°, which matches roulade, then hand-tuned to 23°). With Table, the walk policy sees every hip and ankle 3° away from where it is, and its targets are shifted by 3°. Upstream Microduck's runtime notes that this kind of mismatch "looks like a tuning or timing problem". Table may still walk better if the 23° compensates for something physical, which is what the A/B switch is for.
-- **IMU level:** projected gravity is a policy input. It must be zeroed against a truly level body, not a standing pose. Training randomised the IMU mounting by up to 6° about a random axis, and upstream corrects a systematic board pitch offset at the source. The QMI8658 on this shield has never been levelled.
-- **Command smoothing:** policies are trained on smoothly varying commands; a gamepad gives steps.
+### Home lean (standing and forward / walking backward)
 
-### Suggested A/B procedure
+- **What:** stands the hip pitch and ankle home angles this many degrees more upright. The hip and ankle move together, so the feet stay flat. That moves the body forward over the feet by about 1.3 mm per degree, in every policy's home and in Default pose. The applied lean blends from the standing/forward value to the backward value as the walk command goes from 0 to −0.2 backward, changing at most 20°/s (0.4° per tick) so the policy's joint observations never jump. Default pose follows the same slewed lean.
+- **Why:** the XGO training model (`xgoduck_rl/src/mjlab_microduck/robot/xgoduck/`) has no Uno Q, shield or battery. Its SolidWorks parts list for the trunk has none of them, and the 68 g added to its trunk mass sits near the trunk centre. On the robot the battery sits between the body and the Uno Q, about 47–55 mm behind that point. That puts the real centre of mass an estimated 7–11 mm behind the trained one. Training randomised the centre of mass by only ±3 mm, ramping to ±8 mm, and switched mass randomisation off. The robot walked forward but fell when walking backward. Measured: backward walking needed 9–10° of lean (about 12 mm), and that much lean made forward walking unstable, hence two values.
+- **Tune:** set the forward value to the most lean that keeps forward walking steady (start at 0). Raise the backward value until backward walking holds. The real fixes are to move the battery forward or retrain with the true centre of mass.
 
-1. Charge the battery (check the header reads ≥ 8.0 V) and use the same flat floor each time.
-2. **Level IMU** once, holding the body level against a spirit level on its flat top (torque off), not standing in Default pose.
-3. With **Table**, then with **Model**, walk the same short sequence: stand, walk forward at half stick for 5 s, turn in place each way, stop. Note falls, drift, foot scuffing and how quickly it recovers.
-4. Repeat step 3 with command smoothing at 0.15 s.
-5. Keep whichever combination is steadier. Leave the others at their defaults while testing one change.
+### IMU level
 
-Other things that affect walking but aren't settings yet: servo run gains (KP 6, KD 20 in `sketch/duck_config.h`; upstream Microduck runs its servos with D = 0), action smoothing (the **Action smoothing** sliders; upstream disagrees on whether its policies expect filtering), mechanical backlash (training assumed about ±1° per joint), and foot friction.
+- **What:** the IMU's mounting roll and pitch, cancelled before the tilt estimate the policy uses for balance.
+- **Why:** training randomised the IMU mount by up to 6° about a random axis. A systematic board tilt has to be corrected on the robot. Measured with a spirit level, the development robot's IMU sits about 4° nose-up.
+- **Tune:** turn torque off and hold the robot so a spirit level (or phone level app) on the body's flat top reads level front-to-back and side-to-side. Keep it still and press **Level IMU**. It averages 1 s and refuses if the robot moves, isn't at about 1 g, or is tilted more than 30°. **Reset** clears it. Don't level in Default pose: head weight and servo sag tilt the body there, and levelling that way hid a real backward lean (−5.4°) and made the robot fall backward.
+
+### Command smoothing
+
+- **What:** a first-order low-pass on the walk and head commands, as a time constant (0–0.5 s).
+- **Why:** policies are trained on smoothly varying commands, while a gamepad gives steps. Upstream Microduck smooths its commands the same way.
+- **Tune:** 0.1–0.2 s. Longer feels sluggish.
+
+### Servo KP / KD
+
+- **What:** the run gains of every joint servo in Default pose and Walk: the servos' temporary KP/KD registers, 50 and 51. Defaults are KP 6 and KD 20. They are applied live, echoed back by the MCU, and resent if they differ.
+- **Why:** the flight recorder showed the legs achieving only about 40–50% of each commanded swing, about 85 ms late; the policy then over-corrects. Training assumed servo P = 5 (`kp_fw=5`) and a 4 ms command delay. Upstream Microduck runs its servos with no damping, because damping makes them slow.
+- **Tune:** one step at a time (KP +2, or KD −6): **Clear**, walk the same sequence, compare **Last walk**. Stop if a servo buzzes, the robot shakes while standing, or a temperature climbs past about 50 °C.
+
+### Last walk
+
+- **What:** a summary of the flight recorder (`GET /api/log/summary`). For walking forward, backward, turning and standing it gives the follow ratio (achieved over commanded leg swing, 1.0 = all of it) and the delay, plus falls and the resting pitch. It covers all walking in the recorder's last 20 s and updates every 2 s.
+- **Why:** it turns "it falls" into numbers that can be compared between settings. Most of the findings below came from it.
+- **Tune:** press **Clear** before each change.
+
+### Action smoothing
+
+- **What:** a low-pass on the policy's output. Each tick keeps α of the previous action; 0 means no filtering.
+- **Why:** it is kept at the reference deployment's 0.45. Upstream Microduck disagrees with itself here: its training repo says the policies are trained unfiltered, but its runtime filters with α = 0.7 on the legs and 0.5 on the head. The XGO training repo doesn't say. Filtering adds delay on top of the servos' delay.
+- **Tune:** if walking is late to catch a stumble, try a lower leg α (0.3, then 0.15); if it jitters, raise it.
+
+### What was found on the development robot
+
+In the order the problems were found:
+
+1. **Neck pitch and head pitch were mounted reversed.** The walk policy uses the heavy head to balance, so it was correcting the wrong way. Fixed on the **Check** page.
+2. **Calibration zeros were lost at startup.** A second calibration message overwrote the zeros before the MCU read them. The host now resends them until the MCU confirms.
+3. **The IMU had been dead after a shield brownout.** It kept answering, but read zero, while reporting OK, so the policy walked with no balance feedback. The firmware now re-initialises the IMU.
+4. **The servos follow only about half of each commanded swing, about 85 ms late** (see Servo KP/KD).
+5. **The centre of mass is behind the trained one** (see Home lean).
+
+With 1–3 fixed and the IMU levelled, the robot walked forward at up to vx 0.39 without falling. It still fell walking backward until about 9–10° of backward lean was applied.
+
+### Suggested procedure
+
+1. Charge the battery (≥ 7.8 V) and use the same flat floor each time.
+2. Level the IMU against a spirit level once.
+3. Set **Home pose** to Model and command smoothing to 0.15 s.
+4. Find the forward lean, then the backward lean.
+5. Then try the servo gains, one step at a time, using **Last walk** to compare.
 
 ## Bluetooth controller
 

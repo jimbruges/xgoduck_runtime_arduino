@@ -9,19 +9,54 @@
 <section><h2>Motion</h2><div class="joysticks"><div class="joystick-side"><label id="left-label">Forward / strafe</label><div class="joy" id="joy-left" role="group" aria-labelledby="left-label"><div class="knob"></div></div><p class="joy-value">vx <span id="vxValue">0.00</span> · vy <span id="vyValue">0.00</span></p></div><div class="joystick-side"><label id="right-label">Yaw</label><div class="joy" id="joy-right" role="group" aria-labelledby="right-label"><div class="knob"></div></div><p class="joy-value">ωz <span id="wzValue">0.00</span></p></div></div><button id="zero">Zero motion</button><p class="hint" id="pad-note">No Bluetooth controller connected. Pair one on the <a href="/controller.html">Controller</a> page.</p><p class="hint">Drag a pad; release returns it to zero. Limits are vx ±0.4, vy ±0.3, ωz ±1.0. Keys: W/S forward, A/D strafe, Q/E yaw. Space turns torque off.</p></section>
 <section><h2>Head and mouth</h2><div class="controls" id="head-controls"></div><p class="hint">Head 1–4 are neck pitch, head pitch, head yaw and head roll (IDs 30–33), each ±1. In Default pose they move those joints directly, by up to ±30°, ±35°, ±60° and ±20°. While walking they are inputs to the walk policy, which decides how far the head follows. The mouth is motor 34, 0–30°, and is sent with the 50 ms command heartbeat. It is not part of the policy observation.</p></section>
 <section><h2>Walk tuning <span id="battery">—</span></h2>
-<div class="tune-grid">
-<div><small>Home pose (observations and actions)</small><div class="buttons tune-toggle"><button data-home="table">Table · hip/ankle 23°</button><button data-home="model">Model · trained default</button></div><p class="hint" id="home-detail">—</p>
-<small>Home lean · standing and forward <span id="lean-now"></span></small><div class="tune-row"><input id="home-lean" type="range" min="-5" max="15" step="1" value="0"><code id="home-lean-v">0°</code></div>
-<small>Home lean · walking backward</small><div class="tune-row"><input id="home-lean-back" type="range" min="-5" max="15" step="1" value="0"><code id="home-lean-back-v">0°</code></div><p class="hint">Stands the hips and ankles this many degrees more upright than the home pose (Default pose and Walk), moving the body forward over the feet by about 1.3 mm per degree. Use it when the robot's centre of mass is behind the trained one, for example when it tips backward. The applied lean blends from the standing/forward value to the backward value as the walk command goes from 0 to −0.2 backward, changing at most 20°/s. Change these while not walking.</p></div>
-<div><small>Command smoothing</small><div class="tune-row"><input id="cmd-tau" type="range" min="0" max="0.5" step="0.05" value="0"><code id="cmd-tau-v">off</code></div><p class="hint">Low-pass on walk and head commands (time constant). Sticks and keys then reach the policy as ramps instead of steps. Try 0.1–0.2 s.</p></div>
-<div><small>IMU level</small><div class="tune-row"><button id="level-imu">Level IMU</button><button id="reset-imu">Reset</button><code id="imu-bias">—</code></div><p class="hint">With torque off, hold the robot so its <b>body</b> is level: put a spirit level (or a phone level app) on the body's flat top and adjust until it reads level both front-to-back and side-to-side. Keep it still and press Level IMU. It averages the accelerometer for 1 s and stores the roll/pitch that makes a level body read as level. Don't use Default pose for this: the head's weight and servo sag can tilt the body a few degrees, and levelling would hide that real lean from the policy.</p></div>
-</div>
-<div class="tune-grid tune-gains">
-<div><small>Servo stiffness · KP <span id="gain-state"></span></small><div class="tune-row"><input id="servo-kp" type="range" min="1" max="32" step="1" value="6"><code id="servo-kp-v">6</code></div><p class="hint">Proportional gain of every joint servo in Default pose and Walk (default 6). Higher follows the policy more closely; too high buzzes, oscillates or runs hot. Raise in steps of 2.</p></div>
-<div><small>Servo damping · KD</small><div class="tune-row"><input id="servo-kd" type="range" min="0" max="40" step="1" value="20"><code id="servo-kd-v">20</code></div><p class="hint">Derivative gain (default 20). Lower responds faster but can overshoot; upstream Microduck runs with none.</p></div>
-<div><small>Last walk (flight recorder)</small><div id="walk-summary" class="walk-summary">—</div><div class="tune-row"><button id="walk-refresh">Refresh</button><button id="walk-clear">Clear</button></div><p class="hint">Follow ratio = how much of each commanded leg swing the servos achieved (1.0 = all of it), with the delay. It covers all walking in the recorder's last 20 s and updates every 2 s. Press Clear before each gain change so the numbers only cover the new setting.</p></div>
-</div>
-<p class="hint">Saved on the robot in data/tuning.json and applied immediately. Home pose: <b>Table</b> is upstream's hand-tuned 23° for every model; <b>Model</b> uses each model's own trained default (walk, get-up and pick 20°, roulade 24°). Switch it while not walking, then compare.</p></section>
-<section><h2>Action smoothing</h2><div class="controls"><label>Leg α<input id="leg-alpha" type="range" min="0" max="0.95" value="0.45" step="0.05"></label><label>Head α<input id="head-alpha" type="range" min="0" max="0.95" value="0.45" step="0.05"></label></div></section>
+<p class="hint">Settings for matching this robot to the walking policy. Each is saved on the robot (<code>data/tuning.json</code>) and applied immediately; the defaults reproduce the original runtime. Change one thing at a time and compare with <b>Last walk</b>. The battery figure above is the lowest servo supply voltage and the hottest servo: the XGO policies were trained at 7.4–8.0 V, so it turns amber below 7.4 V, where torque and walking degrade.</p>
+<div class="tune-cards">
+
+<div class="tune-card"><small>Home pose (observations and actions)</small>
+<div class="buttons tune-toggle"><button data-home="table">Table · hip/ankle 23°</button><button data-home="model">Model · trained default</button></div><p class="hint" id="home-detail">—</p>
+<dl class="why"><dt>What</dt><dd>The joint pose the policy measures its observations from and adds its actions to.</dd>
+<dt>Why</dt><dd>Each ONNX model records the home it was trained around (<code>default_joint_pos</code>): walk, get-up and pick 20°, roulade 24°. The original runtime used one hand-tuned 23° for all of them, so walk saw its hips and ankles 3° off. <b>Model</b> uses each policy's own trained home.</dd>
+<dt>Tune</dt><dd>Prefer <b>Model</b>. Switch only while not walking.</dd></dl></div>
+
+<div class="tune-card"><small>Home lean · standing and forward <span id="lean-now"></span></small>
+<div class="tune-row"><input id="home-lean" type="range" min="-5" max="15" step="1" value="0"><code id="home-lean-v">0°</code></div>
+<small>Home lean · walking backward</small>
+<div class="tune-row"><input id="home-lean-back" type="range" min="-5" max="15" step="1" value="0"><code id="home-lean-back-v">0°</code></div>
+<dl class="why"><dt>What</dt><dd>Stands the hip pitch and ankle home angles this many degrees more upright (feet stay flat), moving the body forward over the feet by about 1.3 mm per degree. The applied lean blends from the first value to the second as the walk command goes from 0 to −0.2 backward, at most 20°/s; Default pose uses the first.</dd>
+<dt>Why</dt><dd>The XGO training model leaves out the Uno Q, shield and battery and puts their weight near the body's centre. On this robot they sit at the back, putting the real centre of mass an estimated 7–11 mm behind the trained one, beyond the ±3–8 mm the policy was trained to tolerate. It falls backward walking backward. Measured: backward walking needed 9–10° of lean, which made forward walking unstable, hence a separate backward value.</dd>
+<dt>Tune</dt><dd>Forward: the most lean that keeps forward walking steady (start at 0). Backward: raise until backward walking holds (about 9–10° here). The real fix is moving the battery forward or retraining with the true centre of mass.</dd></dl></div>
+
+<div class="tune-card"><small>IMU level</small>
+<div class="tune-row"><button id="level-imu">Level IMU</button><button id="reset-imu">Reset</button><code id="imu-bias">—</code></div>
+<dl class="why"><dt>What</dt><dd>The IMU's mounting roll and pitch, cancelled before the tilt estimate the policy uses for balance.</dd>
+<dt>Why</dt><dd>Training randomised the IMU mount by up to 6° but expects a systematic board tilt to be corrected on the robot. Measured with a spirit level, this robot's IMU sits about 4° nose-up.</dd>
+<dt>Tune</dt><dd>Torque off, hold the robot so a spirit level (or phone level app) on the body's flat top reads level both ways, keep still, press Level IMU. Not in Default pose: head weight and servo sag tilt the body there, and levelling that hid a real backward lean and made it fall backward.</dd></dl></div>
+
+<div class="tune-card"><small>Command smoothing</small>
+<div class="tune-row"><input id="cmd-tau" type="range" min="0" max="0.5" step="0.05" value="0"><code id="cmd-tau-v">off</code></div>
+<dl class="why"><dt>What</dt><dd>A low-pass on the walk and head commands (time constant), so stick and key changes reach the policy as ramps.</dd>
+<dt>Why</dt><dd>Policies are trained on smoothly varying commands; a gamepad gives steps. Upstream Microduck smooths its commands the same way.</dd>
+<dt>Tune</dt><dd>0.1–0.2 s. Longer feels sluggish to the sticks.</dd></dl></div>
+
+<div class="tune-card"><small>Servo stiffness · KP <span id="gain-state"></span></small>
+<div class="tune-row"><input id="servo-kp" type="range" min="1" max="32" step="1" value="6"><code id="servo-kp-v">6</code></div>
+<small>Servo damping · KD</small>
+<div class="tune-row"><input id="servo-kd" type="range" min="0" max="40" step="1" value="20"><code id="servo-kd-v">20</code></div>
+<dl class="why"><dt>What</dt><dd>Run gains of every joint servo in Default pose and Walk (temporary KP/KD registers), applied live and confirmed by the MCU. Defaults KP 6, KD 20.</dd>
+<dt>Why</dt><dd>The flight recorder shows the legs reach only about 40–50% of each commanded swing, about 85 ms late; the policy then over-corrects. Training assumed servo P = 5 and a 4 ms command delay. Upstream Microduck runs its servos with no damping, because damping makes them slow.</dd>
+<dt>Tune</dt><dd>One step at a time (KP +2, or KD −6), Clear, walk, compare Last walk. Stop if a servo buzzes, the robot shakes standing, or a temperature climbs past about 50 °C.</dd></dl></div>
+
+<div class="tune-card"><small>Last walk (flight recorder)</small>
+<div id="walk-summary" class="walk-summary">—</div><div class="tune-row"><button id="walk-refresh">Refresh</button><button id="walk-clear">Clear</button></div>
+<dl class="why"><dt>What</dt><dd>For walking forward, backward, turning and standing: the follow ratio (achieved over commanded leg swing, 1.0 = all of it) and the delay, plus falls and resting pitch. Covers all walking in the last 20 s and updates every 2 s.</dd>
+<dt>Why</dt><dd>This is how the problems above were found; it turns "it falls" into numbers you can compare between settings.</dd>
+<dt>Tune</dt><dd>Clear before each change so the numbers only cover the new setting.</dd></dl></div>
+
+</div></section>
+<section><h2>Action smoothing</h2><div class="controls"><label>Leg α<input id="leg-alpha" type="range" min="0" max="0.95" value="0.45" step="0.05"></label><label>Head α<input id="head-alpha" type="range" min="0" max="0.95" value="0.45" step="0.05"></label></div>
+<dl class="why"><dt>What</dt><dd>Low-pass on the policy's output actions: each tick keeps α of the previous action. 0 = no filtering.</dd>
+<dt>Why</dt><dd>Kept at the reference deployment's 0.45. Upstream Microduck disagrees with itself here (its training repo says policies are trained unfiltered; its runtime filters with 0.7 legs / 0.5 head), and the XGO training repo doesn't say. Filtering adds delay on top of the servos' ~85 ms.</dd>
+<dt>Tune</dt><dd>If walking is sluggish or late to catch a stumble, try lowering Leg α (0.3, then 0.15); if it jitters, raise it.</dd></dl></section>
+
 <section class="telemetry"><h2>IMU and servos</h2><div class="telemetry-grid"><div class="imu-lines"><div><b>acc</b><span id="acc-values">—</span></div><div><b>gyro</b><span id="gyro-values">—</span></div><div><b>grav</b><span id="gravity-values">—</span></div></div><div class="table"><table><thead><tr><th>ID</th><th>°</th><th>Target</th></tr></thead><tbody id="joints"></tbody></table></div></div><p class="hint" id="command-health">Waiting for command echo…</p></section>
 </main><script src="app.js"></script></html>
