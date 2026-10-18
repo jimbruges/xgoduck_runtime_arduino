@@ -331,9 +331,10 @@ class Controller:
         return self.tuning_status()
 
     def level_imu(self, seconds=1.0):
-        """Average the accelerometer while the robot stands still and level, and store the
-        roll/pitch that maps it to [0, 0, -1]. Expects Default pose on flat ground, or the
-        body held level."""
+        """Average the accelerometer while the body is held still and level (checked with a
+        spirit level on its flat top), and store the roll/pitch that maps it to [0, 0, -1].
+        Default pose is not a reference: head weight and servo sag can tilt the body, and
+        levelling there would hide a real lean from the policy."""
         acc, gyro, n = [0.0]*3, 0.0, 0
         deadline = time.monotonic() + max(0.5, min(3.0, float(seconds)))
         last = None
@@ -358,7 +359,7 @@ class Controller:
             raise ValueError(f'acceleration {norm:.2f} m/s² is not ~1 g; hold it still and retry')
         roll, pitch = rl_core.level_bias_from_gravity([a / norm for a in mean])
         if abs(roll) > 30 or abs(pitch) > 30:
-            raise ValueError(f'tilt roll {roll:.1f}°, pitch {pitch:.1f}° is too large; is the robot level?')
+            raise ValueError(f'tilt roll {roll:.1f}°, pitch {pitch:.1f}° is too large; is the body held level?')
         status = self.set_tuning({'imu_bias_deg': [round(roll, 2), round(pitch, 2), 0.0]})
         status.update(samples=n, gyro_peak_dps=round(gyro, 2))
         return status

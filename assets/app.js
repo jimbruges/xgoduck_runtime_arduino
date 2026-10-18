@@ -108,7 +108,7 @@ document.querySelectorAll('[data-home]').forEach(x=>x.onclick=()=>setTuning({hom
 $('cmd-tau').oninput=()=>{const v=+$('cmd-tau').value;$('cmd-tau-v').textContent=v?v.toFixed(2)+' s':'off';};
 $('cmd-tau').onchange=()=>setTuning({cmd_tau_s:+$('cmd-tau').value},'Command smoothing updated');
 $('level-imu').onclick=async()=>{
-  if(!confirm('Robot standing level (Default pose on flat ground, or body held level) and still?'))return;
+  if(!confirm('Is the body held level, checked with a spirit level on its flat top, and still? (Not Default pose.)'))return;
   tuneBusy=true;$('message').textContent='Levelling IMU… keep still';
   try{const r=await post('tuning/level',{seconds:1});$('message').textContent=`IMU levelled: roll ${r.tuning.imu_bias_deg[0]}°, pitch ${r.tuning.imu_bias_deg[1]}° (${r.samples} samples)`;}
   catch(e){showError(e);}finally{tuneBusy=false;}

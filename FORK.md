@@ -77,7 +77,7 @@ A **Walk tuning** section on the Control page, saved in `data/tuning.json`:
 
 - **Home pose: Table or Model.** Upstream uses one hand-tuned home (hip/ankle 23°) for every policy. The models' own `default_joint_pos` metadata says walk, get-up and pick were trained around 20° and roulade around 24°. **Model** uses each policy's trained home for observations and actions. Default: Table (upstream behaviour).
 - **Command smoothing:** an optional low-pass on walk and head commands.
-- **IMU level:** measures and cancels the IMU's mounting roll and pitch while the robot stands level. It replaces the hard-coded `IMU_BIAS_DEG`, which was zero.
+- **IMU level:** measures and cancels the IMU's mounting roll and pitch, with the body held level against a spirit level. Levelling in Default pose hid a real backward lean on the development robot. It replaces the hard-coded `IMU_BIAS_DEG`, which was zero.
 - **Battery and temperature:** the MCU's per-tick servo status read is extended from 6 to 8 bytes (adding voltage and temperature, registers 62–63). They travel in the raw packet (`DQR2`, 96 bytes), and the page shows the lowest servo voltage and the hottest servo.
 
 ## Joint direction check

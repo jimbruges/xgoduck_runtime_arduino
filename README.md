@@ -253,20 +253,20 @@ The **Walk tuning** section of the Control page holds settings for A/B testing h
 | --- | --- | --- |
 | Home pose | Table | The pose that observations are measured from and that actions are added to. **Table** is the hand-tuned `HOME_DEG` (hip pitch and ankle ±23°, knee 0°) for every policy. **Model** uses each ONNX policy's own `default_joint_pos` metadata: walk, get-up and pick were trained around ±20° (knee ∓0.29°), roulade around ±24°. Switch only while not walking. |
 | Command smoothing | off | A first-order low-pass on the walk and head commands, as a time constant (0–0.5 s). Stick and key steps reach the policy as ramps. Upstream Microduck smooths commands the same way. |
-| IMU level | 0°, 0° | The IMU's mounting roll and pitch, cancelled before the gravity filter. Stand the robot in Default pose on flat, level ground (or hold the body level), keep it still and press **Level IMU**. It averages the accelerometer for 1 s and refuses if the robot moves, isn't at ~1 g, or is tilted more than 30°. **Reset** clears it. |
+| IMU level | 0°, 0° | The IMU's mounting roll and pitch, cancelled before the gravity filter. With torque off, hold the robot so its **body** is level: a spirit level (or phone level app) on the body's flat top should read level front-to-back and side-to-side. Keep it still and press **Level IMU**. It averages the accelerometer for 1 s and refuses if the robot moves, isn't at ~1 g, or is tilted more than 30°. **Reset** clears it. Don't level in Default pose: the head's weight and servo sag can tilt the body a few degrees, and levelling would hide that real lean. On the development robot that gave −5.4° and made it fall backwards. |
 
 The section header shows the **battery** voltage (the lowest servo supply reading, register 62) and the hottest servo temperature (register 63). They are read with the 100 Hz status and reported at 5 Hz. The policies were trained with supply voltages of roughly 6.5–8.2 V, so torque and walking degrade as the pack runs down; it turns amber below 7.0 V.
 
 ### Why these three
 
 - **Home pose:** the policies' metadata says walk, get-up and pick were trained around 20°, but the runtime uses 23° for all of them (upstream started at 24°, which matches roulade, then hand-tuned to 23°). With Table, the walk policy sees every hip and ankle 3° away from where it is, and its targets are shifted by 3°. Upstream Microduck's runtime notes that this kind of mismatch "looks like a tuning or timing problem". Table may still walk better if the 23° compensates for something physical, which is what the A/B switch is for.
-- **IMU level:** projected gravity is a policy input. Training randomised the IMU mounting by up to 6° about a random axis, and upstream corrects a systematic board pitch offset at the source. The QMI8658 on this shield has never been levelled.
+- **IMU level:** projected gravity is a policy input. It must be zeroed against a truly level body, not a standing pose. Training randomised the IMU mounting by up to 6° about a random axis, and upstream corrects a systematic board pitch offset at the source. The QMI8658 on this shield has never been levelled.
 - **Command smoothing:** policies are trained on smoothly varying commands; a gamepad gives steps.
 
 ### Suggested A/B procedure
 
 1. Charge the battery (check the header reads ≥ 8.0 V) and use the same flat floor each time.
-2. **Level IMU** once, with the robot standing in Default pose.
+2. **Level IMU** once, holding the body level against a spirit level on its flat top (torque off), not standing in Default pose.
 3. With **Table**, then with **Model**, walk the same short sequence: stand, walk forward at half stick for 5 s, turn in place each way, stop. Note falls, drift, foot scuffing and how quickly it recovers.
 4. Repeat step 3 with command smoothing at 0.15 s.
 5. Keep whichever combination is steadier. Leave the others at their defaults while testing one change.
