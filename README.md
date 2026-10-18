@@ -171,6 +171,7 @@ To shift an offset by hand instead, enter Servo setup and post `{"action": "writ
 | --- | --- |
 | A row shows **encoder … out of range** and its slider is locked | The joint is past the encoder wrap. Move it to zero by hand and press **Finish**; that re-centres it. |
 | **Finish** reports that the joint *did not confirm the offset change* | The servo did not answer. Check its cable and the servo supply. The zero was not changed. |
+| The Control page shows IMU **no data** | The IMU answers but reads zero, usually after a shield power loss. The firmware re-initialises it within about a second; Default pose and Walk are refused until it reports real data. |
 | Encoder readings show **—** or rows stop updating | No servo replies. Check the battery, the servo supply and the cables; a loose head cable drops IDs 30–34. If the page shows no readings at all after an app update, the MCU may not have started: fully power-cycle the Uno Q. |
 | The shield resets or the battery cuts out | Do not power many joints at once. Calibration only powers the joints you drag, one at a time. Recharge the pack if it has been cutting out. |
 | Default pose does not stand | Check each joint against the renders with **Move all to zero**, and re-finish any that are off. |

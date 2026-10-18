@@ -255,12 +255,20 @@ class Controller:
             self.feedback, self.rx_time = fb, now
             self.received += 1; self.rx_times.append(now)
 
+    @staticmethod
+    def _imu_valid(fb):
+        # The MCU also flags this now, but never trust an exactly-zero accelerometer:
+        # a reset sensor answers I2C with zeros and the policy would walk blind.
+        return bool(fb and fb.imu_ok and any(abs(a) > 0.01 for a in fb.acc))
+
     def _require_feedback(self, mask):
         fb = self.feedback
         if not fb or time.monotonic()-self.rx_time > .15:
             raise ValueError('MCU feedback is stale')
-        if not fb.imu_ok or (fb.mask & mask) != mask:
-            raise ValueError('required servo feedback / IMU missing')
+        if not self._imu_valid(fb):
+            raise ValueError('IMU data invalid (accelerometer reads zero); check the IMU')
+        if (fb.mask & mask) != mask:
+            raise ValueError('required servo feedback missing')
         return fb
 
     def _disarm_now(self):
@@ -695,7 +703,7 @@ class Controller:
             age = time.monotonic()-self.rx_time
             if mode in ('hold','policy'):
                 lost = None
-                if not fb or age>.15 or not fb.imu_ok:
+                if not fb or age>.15 or not self._imu_valid(fb):
                     lost = 'sensor feedback lost; disarmed'
                 elif time.monotonic()-max(self.web_time, self.pad_time) > 1.0:
                     lost = 'web heartbeat lost; disarmed'
@@ -915,7 +923,8 @@ class Controller:
                 raw_pos=list(self.raw_pos), zero_pos=list(self.zero_pos),
                 factory_zero_pos=list(FACTORY_ZERO), cal_done=list(self.cal_done),
                 cal_targets=list(self.cal_targets), raw_mask=self.raw_mask)
-            result['control_ready']=bool(fb and fb.imu_ok and now-self.rx_time<.15 and self.mode not in EXCLUSIVE_MODES
+            result['imu_valid']=self._imu_valid(fb)
+            result['control_ready']=bool(self._imu_valid(fb) and now-self.rx_time<.15 and self.mode not in EXCLUSIVE_MODES
                                          and self._calibration_synced())
             result['calibration_synced']=self._calibration_synced()
             result['servo_scan_version'] = 1

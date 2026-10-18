@@ -112,6 +112,22 @@ static bool updateImu() {
     return false;
   }
 
+  // A brownout can reset the sensor to power-down while it still answers on I2C: reads
+  // succeed but return zeros. Check the enable register once a second and treat repeated
+  // all-zero acceleration as dead; either re-initialises the sensor via the probe above.
+  static uint32_t lastConfigMs = 0;
+  static uint8_t zeroReads = 0;
+  const uint32_t nowMs = millis();
+  if ((uint32_t)(nowMs - lastConfigMs) >= 1000u) {
+    lastConfigMs = nowMs;
+    uint8_t ctrl7 = 0;
+    if (!qmiRead(QMI8658C_REG_CTRL7, &ctrl7, 1) || ctrl7 != 0x03) {
+      imu.ok = 0;
+      qmiAddr = 0;
+      return false;
+    }
+  }
+
   uint8_t data[12] = {0};
   if (!qmiRead(QMI8658C_REG_ACC_X_L, data, 12)) {
     imu.ok = 0;
@@ -124,6 +140,16 @@ static bool updateImu() {
   int16_t gx_raw = (int16_t)(data[7] << 8 | data[6]);
   int16_t gy_raw = (int16_t)(data[9] << 8 | data[8]);
   int16_t gz_raw = (int16_t)(data[11] << 8 | data[10]);
+
+  if (ax_raw == 0 && ay_raw == 0 && az_raw == 0) {
+    if (++zeroReads >= 5) {
+      zeroReads = 0;
+      imu.ok = 0;
+      qmiAddr = 0;
+    }
+    return false;
+  }
+  zeroReads = 0;
 
   int16_t accx = az_raw;
   int16_t accy = ax_raw;

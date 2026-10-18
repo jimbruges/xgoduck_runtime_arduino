@@ -84,6 +84,14 @@ A **Walk tuning** section on the Control page, saved in `data/tuning.json`:
 
 A **Check** page tests every joint's direction and the IMU axes against the Microduck model the policies were trained on, with torque off. Upstream hard-codes direction −1 for all 15 servos. Here a reversed joint is fixed with **Flip direction**, saved in `data/joint_signs.json`, and applied by the MCU at runtime: a new `CAL_SET_SIGNS` message, ignored while armed. The MCU echoes the active directions in the raw packet (`posSignMask`, which grows the packet to 98 bytes), and the host re-sends them whenever they differ. On the development robot, neck pitch and head pitch were reversed. That fits the walk failing within two steps, because the policy moves the heavy head to balance.
 
+## IMU recovery after a shield power loss
+
+Upstream marks the IMU healthy on any successful I2C read. After a shield brownout, the QMI8658 resets to power-down but still answers I2C, so it reported "OK" with an all-zero accelerometer and gyro, and the walk policy ran with no balance feedback. The firmware now checks the sensor's enable register once a second and treats repeated all-zero readings as dead; either one re-initialises the sensor, which recovered in about 1 s on the test robot without rebooting the Uno Q. The host independently refuses to arm, and disarms, on an all-zero accelerometer, and the Control page shows "no data".
+
+## Calibration resync and flight recorder
+
+The host now confirms the saved zeros and joint directions on the MCU, resending them after an MCU reset or a lost message. It sends one calibration message at a time, because the MCU holds only one. Default pose and Walk wait until both are confirmed. A flight recorder keeps the last 20 s of tilt, gyro, joint targets and measured angles while position control is on (`GET /api/log`).
+
 ## Notes from bring-up
 
 These are observations from one robot, not guarantees:
