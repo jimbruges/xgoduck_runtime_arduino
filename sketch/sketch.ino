@@ -23,8 +23,13 @@ static bool pending = false;
 static uint32_t invalidCommands = 0, reportDrops = 0;
 
 static HostBusMode hostMode = HOST_NORMAL;
-static CalPacket pendingCal = {};
-static bool calPending = false;
+// Calibration messages queue in order: a later target or keep-alive must never
+// overwrite a Finish (or zeros, signs, gains) the control thread has not applied yet.
+// Two slots fit the MCU's RAM (eight did not link) and are enough: the host pauses zero,
+// sign and gain resends during a Finish, and slider targets merge into one entry.
+static const unsigned CAL_QUEUE_LEN = 2;
+static CalPacket calQueue[CAL_QUEUE_LEN] = {};
+static unsigned calHead = 0, calCount = 0;
 static ServoPacket pendingServo = {};
 static bool servoPending = false;
 static ServoReplyPacket servoReply = {};
@@ -69,8 +74,14 @@ static void receiveCal(MsgPack::bin_t<uint8_t> bytes) {
     }
   }
   k_mutex_lock(&hostMu, K_FOREVER);
-  if (valid) { pendingCal = pkt; calPending = true; }
-  else {
+  if (valid && pkt.op == CAL_SET_RAW && calCount &&
+      calQueue[(calHead + calCount - 1) % CAL_QUEUE_LEN].op == CAL_SET_RAW) {
+    // Only the newest slider targets matter; replace queued ones rather than pile up.
+    calQueue[(calHead + calCount - 1) % CAL_QUEUE_LEN] = pkt;
+  } else if (valid && calCount < CAL_QUEUE_LEN) {
+    calQueue[(calHead + calCount) % CAL_QUEUE_LEN] = pkt;
+    ++calCount;
+  } else {
     k_mutex_lock(&commandMu, K_FOREVER); ++invalidCommands; k_mutex_unlock(&commandMu);
   }
   k_mutex_unlock(&hostMu);
@@ -232,7 +243,19 @@ static void calFinishOne(unsigned i) {
   // Release the joint while its frame changes so its old goal cannot drive it.
   scsWriteByte(id, ADDR_TORQUE, 0);
   Serial1.flush();
-  servoWriteLimit(id, ADDR_POS_OFFSET, newOffset);
+  // The write is unacknowledged; read it back so a lost packet is retried, not reported
+  // as calibrated. If it never takes, the old offset stays and the host sees no 2048.
+  bool written = false;
+  for (unsigned attempt = 0; attempt < 3 && !written; ++attempt) {
+    servoWriteLimit(id, ADDR_POS_OFFSET, newOffset);
+    ServoReplyPacket check = {};
+    readRegForReply(id, ADDR_POS_OFFSET, check);
+    written = check.ok && check.rawPos == newOffset;
+  }
+  if (!written) {
+    if (held) { scsWriteByte(id, ADDR_TORQUE, 1); Serial1.flush(); }
+    return;
+  }
   k_mutex_lock(&motorsMu, K_FOREVER);
   motors[i].zeroPos = CAL_ZERO_POS;
   motors[i].fbPos = CAL_ZERO_POS;
@@ -356,7 +379,10 @@ static void controlTask(void*, void*, void*) {
     ServoPacket servoPkt;
     bool gotCal = false, gotServo = false;
     k_mutex_lock(&hostMu, K_FOREVER);
-    if (calPending) { calPkt = pendingCal; calPending = false; gotCal = true; }
+    if (calCount) {
+      calPkt = calQueue[calHead]; calHead = (calHead + 1) % CAL_QUEUE_LEN; --calCount;
+      gotCal = true;
+    }
     if (servoPending) { servoPkt = pendingServo; servoPending = false; gotServo = true; }
     k_mutex_unlock(&hostMu);
     if (gotCal) applyCalOp(calPkt);

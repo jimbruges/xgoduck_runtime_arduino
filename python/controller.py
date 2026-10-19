@@ -129,6 +129,8 @@ class Controller:
         self.zero_target = list(self.zero_pos)
         self._zeros_sent = 0.0
         self._resync_hold_until = 0.0  # Finish changes an MCU zero before the host records it
+        self._finishing = False  # no slider targets reach the MCU while a Finish is confirmed
+        self.raw_seq = 0  # raw packets received, to wait for fresh readings
         self.sign_mask = self._load_signs()  # bit i: joint i uses direction +1
         self.mcu_sign_mask = None
         self._signs_sent = 0.0
@@ -227,6 +229,7 @@ class Controller:
             return
         with self.lock:
             self.raw_pos = pkt['pos']
+            self.raw_seq += 1
             self.servo_volt, self.servo_temp = pkt['volt'], pkt['temp']
             self.raw_mask = pkt['mask']
             self.mcu_sign_mask = pkt['pos_sign_mask']
@@ -620,7 +623,7 @@ class Controller:
                 raise ValueError('not in calibrate mode')
             self.cal_targets = values
             self.web_time = time.monotonic()
-            if mask:
+            if mask and not self._finishing:
                 raw = [0 if v is None else v for v in values]
                 self.bridge.notify('duck_cal', encode_cal(CAL_SET_RAW, mask=mask, raw=raw))
         return {'ok': True, 'targets': values}
@@ -632,22 +635,33 @@ class Controller:
         with self.lock:
             if self.mode != 'calibrate':
                 raise ValueError('not in calibrate mode')
-            # The MCU re-centres the servo's position offset so this pose reads CAL_ZERO.
+            if self._finishing:
+                raise ValueError('another Finish is still being confirmed')
+            # The MCU re-centres the servo's position offset so this pose reads CAL_ZERO,
+            # reading the register back and retrying up to three times (~25 ms each).
+            self._finishing = True
             self._resync_hold_until = time.monotonic() + 2.0
             self.bridge.notify('duck_cal', encode_cal(CAL_FINISH_ONE, index=index))
             self.web_time = time.monotonic()
-        # Confirm from fresh raw feedback before saving; the EEPROM write takes ~25 ms.
-        deadline = time.monotonic() + 0.8
-        time.sleep(0.08)
-        while True:
-            with self.lock:
-                raw = int(self.raw_pos[index])
-            if abs(raw - CAL_ZERO) <= 40:
-                break
-            if time.monotonic() > deadline:
-                raise ValueError(f'ID {MOTOR_IDS[index]} did not confirm the offset change '
-                                 f'(reads {raw}); its zero was not changed')
+            seq = self.raw_seq
+        try:
+            # Confirm from three consecutive fresh readings of that servo after the change.
+            deadline = time.monotonic() + 1.2
+            good, raw = 0, None
             time.sleep(0.05)
+            while good < 3:
+                with self.lock:
+                    fresh = self.raw_seq != seq and self.raw_mask >> index & 1
+                    seq, raw = self.raw_seq, int(self.raw_pos[index])
+                if fresh:
+                    good = good + 1 if abs(raw - CAL_ZERO) <= 12 else 0
+                if time.monotonic() > deadline:
+                    raise ValueError(f'ID {MOTOR_IDS[index]} did not confirm the offset change '
+                                     f'(reads {raw}); its zero was not changed. Press Finish again.')
+                time.sleep(0.02)
+        finally:
+            with self.lock:
+                self._finishing = False
         with self.lock:
             self.zero_target[index] = CAL_ZERO
             self.zero_pos[index] = CAL_ZERO

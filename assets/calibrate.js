@@ -79,6 +79,7 @@ async function finish(i){
   if(finishing)return;
   finishing=true;
   const held=targets[i]!==null;
+  $('message').textContent=`Saving ID ${MOTORS[i]} zero…`;
   try{
     while(targetBusy)await sleep(20);
     targets[i]=null;
@@ -164,7 +165,8 @@ setInterval(async()=>{
     syncGuide();
     if(active){
       // Keep the calibration session alive. Status reads do not refresh its heartbeat.
-      if(!targetBusy&&!finishing) post('cal/targets',{targets:[...targets]}).catch(()=>{});
+      // Through queueTargets, so Finish waits for it and it never follows a Finish.
+      if(!targetBusy&&!finishing) queueTargets();
     }
   }catch(e){showError(e);}
   finally{statusBusy=false;}
