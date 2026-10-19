@@ -243,6 +243,11 @@ static void calFinishOne(unsigned i) {
   // Release the joint while its frame changes so its old goal cannot drive it.
   scsWriteByte(id, ADDR_TORQUE, 0);
   Serial1.flush();
+  // That write is answered with a status packet. Let it finish before the unlock goes out,
+  // or the two collide, the unlock is lost and the offset is saved to RAM only: it reads
+  // back correctly but reverts at the next servo power cycle.
+  k_msleep(2);
+  drainServoRx();
   // The write is unacknowledged; read it back so a lost packet is retried, not reported
   // as calibrated. If it never takes, the old offset stays and the host sees no 2048.
   bool written = false;
