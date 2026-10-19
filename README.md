@@ -422,6 +422,12 @@ Default mapping:
 - If the controller disconnects, or the helper stops, motion zeroes within 0.3 s. Without a page open, position control turns off after 1 s.
 - Calibration and Servo setup ignore the controller.
 
+### If the controller stops reconnecting
+
+The helper checks the adapter every 10 s and powers it back on if it is off. The Controller page's adapter line shows the last power event, and the helper logs it (`journalctl --user -u xgoduck-pad` on the board).
+
+After a long uptime (about 20 minutes on the development robot) the Uno Q's Qualcomm Bluetooth core can crash. The kernel log shows `hci0: command 0x0405 tx timeout`, then `Reading QCA version information failed`. The adapter then cannot be powered on, so a paired controller can never reconnect. After a minute of this the Controller page says *the Bluetooth chip has stopped responding; restart the Uno Q*. Restarting the Uno Q recovers it; rebinding the `hci_uart_qca` driver did not. The same chip also does Wi-Fi, which can stop passing traffic at the same time. Reconnecting Wi-Fi (`nmcli connection up <network>`) recovered that without a restart.
+
 ### Head in Default pose
 
 The four head channels are neck pitch, head pitch, head yaw and head roll (IDs 30–33).

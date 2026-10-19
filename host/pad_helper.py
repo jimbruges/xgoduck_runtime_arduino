@@ -211,6 +211,31 @@ class PadLoop(threading.Thread):
             self.last_error = f'app unreachable: {exc}'
 
 
+def log(message):
+    # The service runs under systemd, so this lands in `journalctl --user -u xgoduck-pad`.
+    print(time.strftime('%Y-%m-%d %H:%M:%S'), message, flush=True)
+
+
+def rfkill_state():
+    """'soft-blocked', 'hard-blocked' or '' for the Bluetooth radio (readable without root)."""
+    base = '/sys/class/rfkill'
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return ''
+    for name in names:
+        try:
+            if open(f'{base}/{name}/type').read().strip() != 'bluetooth':
+                continue
+            if open(f'{base}/{name}/hard').read().strip() == '1':
+                return 'hard-blocked'
+            if open(f'{base}/{name}/soft').read().strip() == '1':
+                return 'soft-blocked'
+        except OSError:
+            continue
+    return ''
+
+
 def btctl(*args, timeout=30):
     out = subprocess.run(['bluetoothctl', *args], capture_output=True, text=True,
                          timeout=timeout)
@@ -238,6 +263,49 @@ class Bluetooth:
         self.scan_proc = None
         self.lock = threading.Lock()
         self.autopair_state = {'active': False, 'message': ''}
+        self.power_note = ''
+        threading.Thread(target=self._keep_powered, daemon=True, name='bt-power').start()
+
+    def _keep_powered(self):
+        """A bonded controller cannot reconnect to an unpowered adapter, so check every 10 s
+        and power it back on, logging what was found.
+
+        After long uptimes the Uno Q's Qualcomm Bluetooth core can also crash ("hci0: command
+        tx timeout", then "Reading QCA version information failed"): the adapter then sticks
+        at "PowerState: off-enabling" and power on answers org.bluez.Error.Busy, later Failed.
+        Rebinding the hci_uart_qca driver did not recover it on the development robot;
+        restarting the Uno Q did. That case is reported as needing a restart."""
+        last, stuck_since = '', 0.0
+        while True:
+            try:
+                show = btctl('show', timeout=8)
+                if 'Powered: yes' in show:
+                    if last:
+                        log('bluetooth: adapter powered')
+                    last, stuck_since = '', 0.0
+                else:
+                    why = ('no controller' if 'No default controller' in show else 'adapter off')
+                    block = rfkill_state()
+                    if block:
+                        why += f', radio {block}'
+                    reply = btctl('power', 'on', timeout=8).strip().splitlines()
+                    ok = 'Powered: yes' in btctl('show', timeout=8)
+                    what = (f'{why}; powered back on' if ok else
+                            f'{why}; power on failed: {reply[-1] if reply else "no reply"}')
+                    # Busy or Failed for a minute, with the radio not blocked: the chip is gone.
+                    wedged = not ok and not block
+                    stuck_since = (stuck_since or time.monotonic()) if wedged else 0.0
+                    if stuck_since and time.monotonic() - stuck_since > 60:
+                        what = ('the Bluetooth chip has stopped responding; restart the Uno Q '
+                                'to recover it')
+                    self.power_note = f'{time.strftime("%H:%M:%S")} {what}'
+                    if what != last:  # once per change, not every 10 s while it stays down
+                        log(f'bluetooth: {what}')
+                    last = '' if ok else what
+            except (OSError, subprocess.SubprocessError) as exc:
+                self.power_note = f'{time.strftime("%H:%M:%S")} bluetoothctl failed: {exc}'
+                log(f'bluetooth: {self.power_note}')
+            time.sleep(10)
 
     def _listed(self, *filt):
         """MAC -> name from `bluetoothctl devices [filter]`."""
@@ -264,7 +332,8 @@ class Bluetooth:
                 d[f.lower()] = d['mac'] in flags[f]
         devices.sort(key=lambda d: (not d.get('connected'), not d.get('paired'),
                                     d.get('icon') != 'input-gaming', -(d.get('rssi') or -999)))
-        return {'powered': powered, 'scanning': time.monotonic() < self.scan_until,
+        return {'powered': powered, 'power_note': self.power_note,
+                'scanning': time.monotonic() < self.scan_until,
                 'autopair': dict(self.autopair_state),
                 'hidden_unnamed': len(listed) - len(keep),
                 'scan_left_s': max(0, round(self.scan_until - time.monotonic())),

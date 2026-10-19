@@ -18,7 +18,7 @@ function show(m){$('message').textContent=m;}
 async function refreshBt(){
   try{
     const s=await api('bt/status');
-    $('bt-state').textContent=(s.powered?'adapter on':'adapter off')+(s.scanning?` · scanning ${s.scan_left_s}s`:'');
+    $('bt-state').textContent=(s.powered?'adapter on':'adapter off')+(s.scanning?` · scanning ${s.scan_left_s}s`:'')+(s.power_note?` · last power event ${s.power_note}`:'');
     $('scan').disabled=busy||s.scanning;
     const ap=s.autopair||{};
     $('autopair').disabled=busy||ap.active;
