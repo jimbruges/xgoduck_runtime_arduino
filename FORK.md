@@ -4,6 +4,10 @@ Based on [LuwuDynamics/xgoduck_runtime_arduino](https://github.com/LuwuDynamics/
 
 The changes come from bringing up an assembled XGO Duck, where the upstream calibration flow tripped the battery and several joints could not be calibrated or reach the Default pose.
 
+Companion forks for the same UNO Q build:
+- [jimbruges/xgoduck_hardware](https://github.com/jimbruges/xgoduck_hardware): the clip-on UNO Q cover and the whole-robot CAD assembly (UNO Q, expansion board, 2 × 18650 pack, cover). The calibration page's zero-pose images and the retrained policy's mass placement come from it.
+- [jimbruges/xgoduck_rl](https://github.com/jimbruges/xgoduck_rl), branch `cad-battery`: the walk policy retrained with the real mass and centre of mass (see below).
+
 ## Walking: what was wrong and what this fork changes
 
 Getting the robot to walk uncovered five problems. Each has a fix or a setting, and each setting on the Control page explains itself (**What / Why / Tune**). The README's *Walk tuning* section has the full evidence.
@@ -21,9 +25,18 @@ Also: the home pose now follows each model's training metadata (20°, not the ha
 ## Retrained walk policy (real mass and centre of mass)
 
 The original walk policy was trained on a model without the Uno Q, shield and battery at the back. A retrained policy comes from [jimbruges/xgoduck_rl](https://github.com/jimbruges/xgoduck_rl), branch `real-mass-com`, which changes three things from Luwu's model:
-- the real total mass (825 g), with the trunk's centre of mass moved back so the whole robot's sits 8 mm further back;
+- the real total mass (825 g), with the trunk's centre of mass moved back;
 - current xgoduck_rl's ±15 mm centre-of-mass randomisation;
 - an 8–24 ms randomised command delay, matching this runtime.
+
+There are two retrains, differing only in where the extra mass sits:
+
+| Model | Branch | Mass placement | Whole-robot CoM vs upstream |
+|---|---|---|---|
+| `xgoduck_walk_realcom.onnx` | `real-mass-com` | battery, Uno Q, shield and cover (~143 g) all behind the body at x −55 mm | 8 mm back |
+| `xgoduck_walk_cadbattery.onnx` | `cad-battery` | positions from the [CAD assembly](https://github.com/jimbruges/xgoduck_hardware/blob/master/structure/assembly/xgoduck_full_assembly.solidcraft): battery (~95 g) inside the body at x −20 mm, Uno Q, shield, cover and connectors (~48 g) behind it at x −51 mm | 3.7 mm back |
+
+The CAD check found the first retrain over-corrected: the 18650 cells sit in the body, in front of the Uno Q, not behind it. The CAD has no real masses (every part uses one default density), so the 95/48 g split is an estimate. Weighing the battery pack and the Uno Q stack would pin it down.
 
 It was trained with Hugging Face Jobs (`--hf-jobs`, L4 GPU, about 3 h and $3) and exported with `scripts/export.py`. **Walk policy** in Walk tuning switches between `xgoduck_walk.onnx` and any other `python/xgoduck_walk*.onnx` for A/B testing.
 
