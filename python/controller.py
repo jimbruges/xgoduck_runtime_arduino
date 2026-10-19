@@ -32,6 +32,11 @@ PICK_MOUTH_CLOSE_PHI = 0.4
 ROULADE_S = 1.9
 ROULADE_ALPHA = 0.15
 CONTROL_PERIOD = 0.02
+# After a fall, joints move to the get-up start pose at this rate instead of in one tick.
+# A one-tick jump drives every leg servo into the ground at once, and that current spike
+# can trip the battery or shield protection (the robot then stays off until the switch is
+# cycled). At 90°/s a typical 30-60° move takes 0.3-0.7 s, inside the 1 s fall hold.
+FALL_SLEW_DEG_S = 90.0
 # Default pose (hold) has no policy, so head channels 1-4 (IDs 30-33: neck pitch, head pitch,
 # head yaw, head roll) offset those joints directly: ±1 maps to ± these degrees, inside the
 # model's joint ranges, and the offset moves at most HEAD_HOLD_STEP_DEG per 20 ms tick.
@@ -144,6 +149,7 @@ class Controller:
         self._offset_scan_wanted = True
         self._offset_scanning = False
         self._offset_retry_at = 0.0
+        self._fall_target = None  # ramped get-up start pose while in the fall hold
         self._offset_touched = set()  # IDs recalibrated or rewritten since the last scan
         self._servo_seen = [0.0]*15   # when each servo last answered (state packets)
 
@@ -993,8 +999,22 @@ class Controller:
             # Switch to getup immediately, but force action/history to zero for 1 s.
             with self.policy_lock:
                 selected.reset_action_filter()
-                target = selected.action_to_deg([0.0]*14)
-        elif inferring:
+                home = selected.action_to_deg([0.0]*14)
+            with self.lock:
+                # Ramp from where the joints are, not from the last walk command.
+                if self._fall_target is None and self.feedback:
+                    self._fall_target = list(self.feedback.angles)
+                if self._fall_target is not None:
+                    step = FALL_SLEW_DEG_S * CONTROL_PERIOD
+                    self._fall_target = [c + max(-step, min(step, h - c))
+                                         for c, h in zip(self._fall_target, home)]
+                    target = list(self._fall_target)
+                else:
+                    target = home
+        else:
+            with self.lock:
+                self._fall_target = None
+        if inferring and phase != 'default_pose':
             if phase == 'getup':
                 twist, head = [0.0]*3, [0.0]*4
             begin = time.monotonic()
