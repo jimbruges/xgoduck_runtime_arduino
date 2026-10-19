@@ -15,6 +15,7 @@ from wire import *
 import pad
 import tuning
 import flight
+import offsets
 
 FACTORY_ZERO = [
     2236, 2005, 1912, 1866, 1945,
@@ -136,6 +137,15 @@ class Controller:
         self._signs_sent = 0.0
         self.mcu_gains = None
         self._gains_sent = 0.0
+        # Servo offset check (see offsets.py). Position modes wait for the first scan.
+        self.offset_ref = offsets.load()
+        self.offset_check = dict(state='pending', mismatch=[], unchecked=[], checked_at=None,
+                                 message='Checking the servo offsets…')
+        self._offset_scan_wanted = True
+        self._offset_scanning = False
+        self._offset_retry_at = 0.0
+        self._offset_touched = set()  # IDs recalibrated or rewritten since the last scan
+        self._servo_seen = [0.0]*15   # when each servo last answered (state packets)
 
     def _load_zeros(self):
         try:
@@ -286,6 +296,21 @@ class Controller:
                 timestamp=now, imu_ok=fb.imu_ok)
             self.feedback, self.rx_time = fb, now
             self.received += 1; self.rx_times.append(now)
+            returned = False
+            for i in range(15):
+                if fb.mask >> i & 1:
+                    # Silent for over 0.5 s, then answering again: its power came back and it
+                    # reloaded its offset from EEPROM, so check it before trusting its zero.
+                    returned |= now - self._servo_seen[i] > 0.5
+                    self._servo_seen[i] = now
+            if returned:
+                self._offset_scan_wanted = True
+                if self.mode in ('hold', 'policy'):
+                    self.mode = 'shadow'; self.generation += 1
+                    self.recovery.reset(); self.policy_needs_reset = True
+                    self._stop_pick_locked(); self._stop_roulade_locked()
+                    self.last_error = 'servo power was lost; disarmed while the offsets are checked'
+                    self._disarm_now()
 
     @staticmethod
     def _imu_valid(fb):
@@ -309,10 +334,17 @@ class Controller:
         sample = self.feedback.sample_us if self.feedback else 0
         self.bridge.notify('duck_command', encode_command(self.seq, sample, DISARM, DEFAULT_DEG))
 
-    def set_mode(self, mode):
+    def set_mode(self, mode, _offset_scan=False):
         if mode not in ('shadow', 'off', 'hold', 'policy', 'calibrate', 'servo_debug'):
             raise ValueError('unknown mode')
         with self.lock:
+            if self._offset_scanning and not _offset_scan:
+                raise ValueError('checking the servo offsets; try again in a moment')
+            if mode in ('hold', 'policy'):
+                if self.offset_check['state'] == 'pending':
+                    raise ValueError('checking the servo offsets; try again in a moment')
+                if self.offset_check['state'] == 'mismatch':
+                    raise ValueError(self.offset_check['message'])
             if mode == self.mode:
                 self.web_time = time.monotonic()
                 return {'mode': self.mode}
@@ -338,6 +370,8 @@ class Controller:
                 self.bridge.notify('duck_cal', encode_cal(CAL_EXIT))
             if previous == 'servo_debug' and mode != 'servo_debug':
                 self.bridge.notify('duck_servo', encode_servo(SERVO_EXIT, 10))
+            if previous in EXCLUSIVE_MODES and mode not in EXCLUSIVE_MODES and not _offset_scan:
+                self._offset_scan_wanted = True  # save what calibration or setup changed
             if mode == 'calibrate':
                 self._disarm_now()
                 self.cal_targets = [None]*15
@@ -667,6 +701,7 @@ class Controller:
             self.zero_pos[index] = CAL_ZERO
             self._resync_hold_until = 0.0
             self.cal_done[index] = True
+            self._offset_touched.add(MOTOR_IDS[index])
             self._save_zeros()
             self.web_time = time.monotonic()
             return {'ok': True, 'index': index, 'zero_pos': self.zero_pos[index],
@@ -680,7 +715,11 @@ class Controller:
     def servo_op(self, action, target_id, new_id=None, kp=5, kd=20, raw_pos=2047):
         with self.servo_op_lock:
             if action != 'set_id':
-                return self._servo_op(action, target_id, new_id, kp, kd, raw_pos)
+                reply = self._servo_op(action, target_id, new_id, kp, kd, raw_pos)
+                if action in ('write_offset', 'set_middle'):
+                    with self.lock:
+                        self._offset_touched.add(int(target_id))
+                return reply
             target_id, new_id = int(target_id), int(new_id)
             if not 0 <= target_id <= 253 or not 0 <= new_id <= 253:
                 raise ValueError('ID must be between 0 and 253')
@@ -697,6 +736,8 @@ class Controller:
                 raise ValueError(f'ID write sent, but ID {new_id} did not reply. Scan again')
             if self._servo_op('ping', target_id)['ok']:
                 raise ValueError('Both old and new IDs replied. Connect only one servo and scan again')
+            with self.lock:
+                self._offset_touched.add(new_id)  # a new servo at this ID: adopt its offset
             return dict(reply, new_id=new_id)
 
     def _servo_op(self, action, target_id, new_id=None, kp=5, kd=20, raw_pos=2047):
@@ -769,6 +810,93 @@ class Controller:
             raise ValueError('servo operation failed')
         return reply
 
+    def _offset_worker(self):
+        while not self.stop_event.wait(0.2):
+            try:
+                self._offset_scan_if_due()
+            except Exception as exc:
+                with self.lock:
+                    self.offset_check['message'] = f'servo offset check failed: {exc}'
+                    self._offset_retry_at = time.monotonic() + 5.0
+
+    def _offset_scan_if_due(self):
+        with self.lock:
+            fb = self.feedback
+            if (not self._offset_scan_wanted or time.monotonic() < self._offset_retry_at
+                    or self.mode not in ('shadow', 'off') or not fb or fb.enabled
+                    or time.monotonic() - self.rx_time > .15 or not fb.mask):
+                return
+        with self.servo_op_lock:
+            with self.lock:
+                if self.mode not in ('shadow', 'off'):
+                    return
+                previous, error, mask = self.mode, self.last_error, self.feedback.mask
+                self._offset_scan_wanted = False
+                self._offset_scanning = True
+                touched = set(self._offset_touched)
+            current, missed = {}, []
+            try:
+                self.set_mode('servo_debug', _offset_scan=True)
+                # The MCU holds one pending servo message: a read sent before it has taken
+                # SERVO_ENTER would replace it, and the MCU refuses reads outside servo setup.
+                deadline = time.monotonic() + 1.0
+                while not (self.feedback and self.feedback.servo_debugging):
+                    if time.monotonic() > deadline:
+                        raise ValueError('the MCU did not enter servo setup')
+                    time.sleep(0.01)
+                for i, motor_id in enumerate(MOTOR_IDS):
+                    if not mask >> i & 1:
+                        missed.append(motor_id)
+                        continue
+                    for attempt in range(3):
+                        try:
+                            reply = self._servo_op('read_reg', motor_id, new_id=ADDR_POS_OFFSET)
+                            current[motor_id] = int(reply['raw_pos'])
+                            break
+                        except ValueError:
+                            if attempt == 2:
+                                missed.append(motor_id)
+            finally:
+                try:
+                    self.set_mode(previous, _offset_scan=True)
+                finally:
+                    with self.lock:
+                        self._offset_scanning = False
+                        self.last_error = error
+        with self.lock:
+            # Adopt servos changed on purpose (Finish, offset writes, a new ID) and servos with
+            # no saved offset yet; every other servo must still hold its saved offset.
+            changed = False
+            for motor_id, value in current.items():
+                if motor_id in touched or motor_id not in self.offset_ref:
+                    changed |= self.offset_ref.get(motor_id) != value
+                    self.offset_ref[motor_id] = value
+            self._offset_touched -= set(current)
+            if changed:
+                offsets.save(self.offset_ref)
+            mismatch = offsets.compare(self.offset_ref, current)
+            unchecked = sorted(set(missed))
+            if missed:
+                self._offset_scan_wanted = True
+                self._offset_retry_at = time.monotonic() + 5.0
+            if not current:
+                self.offset_check = dict(self.offset_check, state='pending', unchecked=unchecked,
+                                         message='Could not read the servo offsets yet; retrying')
+                return
+            if mismatch:
+                ids = ', '.join(str(m['id']) for m in mismatch)
+                detail = '; '.join(f"ID {m['id']} reads {m['now']}, saved {m['saved']}" for m in mismatch)
+                message = (f'Servo calibration changed on ID {ids} ({detail}). Recalibrate '
+                           f'{"it" if len(mismatch) == 1 else "them"} on the Calibration page '
+                           f'before Default pose or Walk.')
+                state = 'mismatch'
+            else:
+                message = ('Servo offsets match calibration' +
+                           (f'; not checked: ID {", ".join(map(str, unchecked))}' if unchecked else ''))
+                state = 'ok'
+            self.offset_check = dict(state=state, mismatch=mismatch, unchecked=unchecked,
+                                     checked_at=time.strftime('%H:%M:%S'), message=message)
+
     def step(self):
         with self.lock:
             if self.pad_time and time.monotonic()-self.pad_time > PAD_ACTIVE_S:
@@ -796,6 +924,7 @@ class Controller:
                     self.mode = mode = 'shadow'; self.generation += 1
                     self.last_error = 'calibrate/servo_debug heartbeat lost; exited'
                     generation = self.generation
+                    self._offset_scan_wanted = True
                     if previous == 'calibrate':
                         self.cal_done = [False]*15
                         self.bridge.notify('duck_cal', encode_cal(CAL_EXIT))
@@ -948,6 +1077,7 @@ class Controller:
                 self.policy_lock.release()
 
     def run(self):
+        threading.Thread(target=self._offset_worker, name='offset_check', daemon=True).start()
         deadline = time.monotonic()
         while not self.stop_event.is_set():
             try:
@@ -1010,8 +1140,9 @@ class Controller:
                 cal_targets=list(self.cal_targets), raw_mask=self.raw_mask)
             result['imu_valid']=self._imu_valid(fb)
             result['control_ready']=bool(self._imu_valid(fb) and now-self.rx_time<.15 and self.mode not in EXCLUSIVE_MODES
-                                         and self._calibration_synced())
+                                         and self._calibration_synced() and self.offset_check['state'] == 'ok')
             result['calibration_synced']=self._calibration_synced()
+            result['offset_check'] = dict(self.offset_check, scanning=self._offset_scanning)
             result['servo_scan_version'] = 1
             present = [i for i in range(15) if self.raw_mask & (1 << i) and self.servo_volt[i]]
             result['battery_v'] = min(self.servo_volt[i] for i in present) / 10 if present else None

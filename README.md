@@ -158,19 +158,31 @@ Each servo reports its position as `(encoder - offset) mod 4096`, where the offs
 So **Finish**, on the MCU:
 
 1. reads the servo's current offset,
-2. switches that joint's torque off and writes a new offset so the present pose reads 2048,
+2. switches that joint's torque off, waits for the servo's reply, then unlocks the EEPROM and writes a new offset so the present pose reads 2048, reading it back and retrying up to three times,
 3. re-holds the joint at 2048 if it was powered, so it does not move.
 
-The host then waits for the joint to report about 2048 before saving that as its zero. If the servo does not confirm within 0.8 s, Finish shows an error and the zero is left unchanged. Every calibrated joint therefore sits mid-range, about ±180° from the wrap, however its horn was fitted.
+The host then waits for three fresh readings within 12 counts of 2048 before saving that as its zero. If the servo does not confirm within 1.2 s, Finish shows an error and the zero is left unchanged; press it again. Slider targets are held back while a Finish is confirmed. Every calibrated joint therefore sits mid-range, about ±180° from the wrap, however its horn was fitted.
 
 To shift an offset by hand instead, enter Servo setup and post `{"action": "write_offset", "target_id": ID, "raw_pos": OFFSET}` to `/api/servo`, with `OFFSET = (reading + current offset - 2048) mod 4096`. `read_reg` with `new_id: 31` returns the current offset. Writing 0 removes the offset. The `set_middle` action (writing 128 to address 40, the STS midpoint command) did not change the reading on the HD-1910 servos tested.
+
+### Offset check
+
+The calibration itself lives in each servo (register 31), so a servo that loses it (a replaced servo, a factory reset, or a write that only reached RAM) points its zero somewhere else. Default pose then drives that joint hard toward the wrong angle, which can brown out the shield.
+
+So the host keeps a reference copy of every servo's offset in `data/servo_offsets.json`:
+
+- **Saved** when you exit Calibration or Servo setup, for the joints you finished or rewrote there, and on the first start for every servo.
+- **Checked** at every start and whenever a servo answers again after more than 0.5 s of silence (its power came back and it reloaded its EEPROM). The check briefly enters Servo setup to read the registers; the mode shows **servo setup** for under a second. A power return during Default pose or Walk disarms first.
+- **If a servo's offset differs**, Default pose and Walk are refused. The Control page explains which ID changed, and the Calibration page outlines that joint. Finish it at its zero, then exit Calibration to save the new value.
 
 ### Troubleshooting
 
 | Symptom | What to do |
 | --- | --- |
 | A row shows **encoder … out of range** and its slider is locked | The joint is past the encoder wrap. Move it to zero by hand and press **Finish**; that re-centres it. |
-| **Finish** reports that the joint *did not confirm the offset change* | The servo did not answer. Check its cable and the servo supply. The zero was not changed. |
+| **Finish** reports that the joint *did not confirm the offset change* | The servo did not answer. Check its cable and the servo supply, then press Finish again. The zero was not changed. |
+| Default pose and Walk are refused with *Servo calibration changed on ID …* | That servo's stored offset no longer matches its calibration (see [Offset check](#offset-check)). Recalibrate that joint and exit Calibration. |
+| After a restart a joint goes back to where it was before calibrating | Its offset never reached the servo's EEPROM. Fixed in this firmware; recalibrate the joint once. |
 | The Control page shows IMU **no data** | The IMU answers but reads zero, usually after a shield power loss. The firmware re-initialises it within about a second; Default pose and Walk are refused until it reports real data. |
 | Encoder readings show **—** or rows stop updating | No servo replies. Check the battery, the servo supply and the cables; a loose head cable drops IDs 30–34. If the page shows no readings at all after an app update, the MCU may not have started: fully power-cycle the Uno Q. |
 | The shield resets or the battery cuts out | Do not power many joints at once. Calibration only powers the joints you drag, one at a time. Recharge the pack if it has been cutting out. |

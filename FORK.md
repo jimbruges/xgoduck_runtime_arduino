@@ -67,6 +67,15 @@ Now **Finish**:
 
 Every calibrated joint therefore sits mid-range, about ±180° from the wrap, regardless of how its horn was fitted. Joints reading outside 0–4095 can be finished too. `data/zero_pos.json` keeps the same format; after calibration every entry is 2048.
 
+Two bugs made Finish unreliable after replacing two hip servos, both fixed:
+
+- **A Finish could be lost.** The MCU kept one pending calibration message, and the page's 250 ms keep-alive (slider targets) could replace a Finish before the MCU applied it. Calibration messages now queue in order (two slots; eight overflowed the MCU's RAM), the keep-alive goes through the queue Finish waits on, and the host holds slider targets back while it confirms a Finish from three fresh readings.
+- **The offset reached RAM only.** Finish switched the joint's torque off with a write addressed to that servo, then sent the EEPROM unlock immediately; the unlock collided with the servo's status reply and was lost. The offset read back correctly but reverted at the next servo power cycle, so Default pose drove the joint to its old frame (a replaced hip roll, about 72°, which browned out the shield). Finish now waits for the reply before unlocking, and reads the written offset back. Verified across a shield power cycle.
+
+### Offset check
+
+The host now saves each servo's offset (`data/servo_offsets.json`) when Calibration or Servo setup closes, and re-reads them at start and whenever a servo's power returns. If any differs, Default pose and Walk are refused with the ID, until that joint is recalibrated. See the README's Offset check section.
+
 ## Zero-pose guide on the calibration page
 
 The hardware docs have no per-joint mechanical-zero drawings. The calibration page now has a **Zero pose** panel:

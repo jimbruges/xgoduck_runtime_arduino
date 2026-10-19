@@ -162,6 +162,11 @@ setInterval(async()=>{
       if(targets[i]===null&&inRange)$(`sl${i}`).value=v;
     });
     if(s.zero_pos)s.zero_pos.forEach((v,i)=>$(`zero${i}`).textContent='zero '+v);
+    // A servo whose offset no longer matches its calibration: flag it until it is redone.
+    const oc=s.offset_check, lost=new Set(oc&&oc.state==='mismatch'?oc.mismatch.map(m=>m.id):[]);
+    $('offset-warn').hidden=!lost.size;
+    if(lost.size)$('offset-warn').textContent=oc.message+' Finish each one, then Exit calibration to save.';
+    MOTORS.forEach((id,i)=>$(`row${i}`).classList.toggle('lost',lost.has(id)));
     syncGuide();
     if(active){
       // Keep the calibration session alive. Status reads do not refresh its heartbeat.

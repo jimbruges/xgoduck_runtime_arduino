@@ -10,3 +10,4 @@ data/joint_signs.json
 tests/
 # local robot backups
 checkpoints/
+data/servo_offsets.json
