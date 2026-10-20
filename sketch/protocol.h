@@ -70,6 +70,7 @@ struct __attribute__((packed)) RawPacket {
   uint8_t temp[15];  // °C
   uint16_t posSignMask;  // joints currently using direction +1
   uint8_t runKp, runKd;  // run gains in use
+  uint8_t guardV10, guardPct;  // supply guard in use: threshold (0.1 V, 0 = off), limited torque %
 };
 struct __attribute__((packed)) ServoReplyPacket {
   char magic[4];
@@ -81,5 +82,5 @@ static_assert(sizeof(CommandPacket) == 80, "Command ABI");
 static_assert(sizeof(StatePacket) == 240, "State ABI");
 static_assert(sizeof(CalPacket) == 38, "Cal ABI");
 static_assert(sizeof(ServoPacket) == 12, "Servo ABI");
-static_assert(sizeof(RawPacket) == 100, "Raw ABI");
+static_assert(sizeof(RawPacket) == 102, "Raw ABI");
 static_assert(sizeof(ServoReplyPacket) == 12, "Servo reply ABI");

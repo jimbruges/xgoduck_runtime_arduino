@@ -7,7 +7,7 @@ STATE = struct.Struct('<4sBBH10I6h45f')
 COMMAND = struct.Struct('<4sIIIBBH15f')
 CAL = struct.Struct('<4sBBH15H')
 SERVO = struct.Struct('<4sBBBBBBH')
-RAW = struct.Struct('<4sH15H15H15B15BHBB')
+RAW = struct.Struct('<4sH15H15H15B15BHBBBB')
 SERVO_REPLY = struct.Struct('<4sBBBBHH')
 ALL_MASK = 0x7fff  # hardware order: 10..14,20..24,30..34
 DISARM, ARM, POLICY, HOLD = range(4)
@@ -21,7 +21,7 @@ assert STATE.size == 240
 assert COMMAND.size == 80
 assert CAL.size == 38
 assert SERVO.size == 12
-assert RAW.size == 100
+assert RAW.size == 102
 assert SERVO_REPLY.size == 12
 
 @dataclass(frozen=True)
@@ -111,12 +111,13 @@ def encode_servo(op, target_id, new_id=0, kp=5, kd=20, raw_pos=2047):
 
 def decode_raw(data):
     if not isinstance(data, (bytes, bytearray)) or len(data) != RAW.size:
-        raise ValueError('expected 100-byte raw')
+        raise ValueError('expected 102-byte raw')
     x = RAW.unpack(data)
-    if x[0] != b'DQR2' or x[1] & ~ALL_MASK:
+    if x[0] != b'DQR3' or x[1] & ~ALL_MASK:
         raise ValueError('invalid raw ABI')
     return {'mask': x[1], 'pos': list(x[2:17]), 'zero': list(x[17:32]),
-            'volt': list(x[32:47]), 'temp': list(x[47:62]), 'pos_sign_mask': x[62], 'run_kp': x[63], 'run_kd': x[64]}
+            'volt': list(x[32:47]), 'temp': list(x[47:62]), 'pos_sign_mask': x[62], 'run_kp': x[63], 'run_kd': x[64],
+            'guard_v10': x[65], 'guard_pct': x[66]}
 
 def decode_servo_reply(data):
     if not isinstance(data, (bytes, bytearray)) or len(data) != SERVO_REPLY.size:

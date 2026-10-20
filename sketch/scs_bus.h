@@ -102,6 +102,7 @@ static void setTempKpKd(uint8_t kp, uint8_t kd) {
 
 // Run gains for position control; the host can change them (CAL_SET_GAINS, Walk tuning).
 static uint8_t runKp = TEMP_KP_RUN, runKd = TEMP_KD_RUN, runKpMouth = TEMP_KP_MOUTH;
+static uint8_t guardV10 = SUPPLY_LIMIT_V10, guardPct = SUPPLY_LIMIT_PCT;
 
 static void setRunKpKd() {
   setTempKpKd(runKp, runKd);

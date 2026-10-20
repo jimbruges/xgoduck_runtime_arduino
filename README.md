@@ -226,7 +226,7 @@ sh tools/robot-data.sh backup
 
 On the new board:
 
-1. Copy the app to `~/ArduinoApps/xgoduck`, for example `git archive --format=tar.gz -o xgoduck.tgz HEAD`, `adb push xgoduck.tgz /tmp/`, then `mkdir -p ~/ArduinoApps/xgoduck && tar -xzf /tmp/xgoduck.tgz -C ~/ArduinoApps/xgoduck` on the board.
+1. On the computer, `sh tools/check-sources.sh` checks that every Python module compiles and every page script parses. A syntax error in a page script silently stops the whole page. Then copy the app to `~/ArduinoApps/xgoduck`, for example `git archive --format=tar.gz -o xgoduck.tgz HEAD`, `adb push xgoduck.tgz /tmp/`, then `mkdir -p ~/ArduinoApps/xgoduck && tar -xzf /tmp/xgoduck.tgz -C ~/ArduinoApps/xgoduck` on the board.
 2. Connect it to Wi-Fi. The first build downloads the pinned board core and the Python packages. A new board can also boot days behind, and HTTPS fails until its clock syncs.
 3. On the board, from the app directory, run `sh tools/setup-board.sh`. It checks internet and the clock and enables lingering, which a fresh board lacks and the Bluetooth helper needs. It sets the router to 2 Mbps (asks for sudo), patches the Bridge libraries, installs the Bluetooth helper and makes this the app that starts at boot. It is safe to re-run, and lists anything left to do.
 4. From the computer, `sh tools/robot-data.sh restore checkpoints/robot-data-<date>`, then start the app.
@@ -324,6 +324,12 @@ To retrain: in the xgoduck_rl fork, run `uv run hf auth login`, then `uv run tra
 - **Why:** the flight recorder showed the legs achieving only about 40–50% of each commanded swing, about 85 ms late; the policy then over-corrects. Training assumed servo P = 5 (`kp_fw=5`) and a 4 ms command delay. Upstream Microduck runs its servos with no damping, because damping makes them slow.
 - **Tune:** one step at a time (KP +2, or KD −6): **Clear**, walk the same sequence, compare **Last walk**. Stop if a servo buzzes, the robot shakes while standing, or a temperature climbs past about 50 °C.
 
+### Supply guard
+
+- **What:** the threshold below which every servo's torque is capped, and how much torque is kept. 0.6 V lower it caps at 20 %; *Turn off* disables it. See [Power cuts when falling](#power-cuts-when-falling-supply-guard).
+- **Why:** the battery sags under load, and a backward fall took it to 5.8 V, where the power protection cut out and latched off.
+- **Tune:** if walking is weak or it falls at full speed, lower the threshold (6.4–6.6 V) or keep more torque (60–70 %). If falls cut the power again, step back.
+
 ### Black box (power cuts)
 
 The flight recorder lives in memory and is lost in a power cut. So the app also writes a compact record about 20 times a second to `data/blackbox/current.jsonl` and syncs it to storage every 0.25 s. Each record holds the mode, recovery phase, tilt, peak acceleration and rotation rate, how many servos answered, servo supply voltage (min and max) and the hottest servo. At each start the previous run's file becomes `previous.jsonl`, so after an unexpected power-off it ends at the cut. Read it at `/api/blackbox/previous` (the last 30 s), or this run's at `/api/blackbox/current`.
@@ -348,16 +354,16 @@ All 15 servos answered to the last record, so nothing came loose. The supply sag
 - If the battery itself drops about 2 V, the cells or the BMS are the limit. Use high-drain cells (for example Molicel P26A, Samsung 25R or 30Q) and a 2S BMS rated for at least 10 A continuous.
 - If the battery stays near 8 V while the servos report 6 V, look at the wiring and connectors between the battery and the servos.
 
-**Supply guard (firmware).** While Default pose or Walk is on, the MCU checks every servo's supply voltage each 10 ms tick:
+**Supply guard (firmware, set in Walk tuning).** While Default pose or Walk is on, the MCU checks every servo's supply voltage each 10 ms tick. Two settings on the Control page's **Supply guard** card control it (defaults 6.8 V and 50 %):
 
-- Below **6.8 V**, every servo's torque limit (register 48) drops to **50 %**.
-- Below **6.2 V**, it drops to **20 %**, close to limp but still holding position.
-- Once every servo reads 7.3 V or more for 0.3 s, the limit steps back up one level at a time.
-- With torque off, and in calibration and servo setup, the limit is always 100 %.
+- Below the **threshold**, every servo's torque limit (register 48) drops to the **torque kept** setting.
+- 0.6 V below the threshold, it drops to 20 % (or the torque setting, if lower), close to limp but still holding position.
+- Once every servo reads 0.5 V above the threshold for 0.3 s, the limit steps back up one level at a time.
+- With torque off, and in calibration and servo setup, the limit is always 100 %. **Turn off** disables the guard.
 
-Capping torque caps the current, so the supply recovers instead of reaching the protection's cut-off. The thresholds are in `sketch/duck_config.h` (`SUPPLY_LIMIT_V10`, `SUPPLY_SEVERE_V10`, `SUPPLY_RESTORE_V10`). The Control page shows *torque limited (supply low)* next to the battery figure while it is active, and how many times it has triggered. The black box logs it as `lim` (0, 1 or 2).
+Capping torque caps the current, so the supply recovers instead of reaching the protection's cut-off. Both settings travel with the servo gains, and the card shows *applied* once the MCU has echoed them back. The Control page shows *torque limited (supply low)* next to the battery figure while it is active, and how many times it has triggered. The black box logs it as `lim` (0, 1 or 2).
 
-Trade-off: on a pack that already dips below 6.8 V on hard steps, the guard also limits torque briefly during normal walking, which can make walking weaker. If it triggers often while walking, that is the sign to fix the supply. Lowering the thresholds trades walking strength against the risk of a cut.
+Trade-off: the development robot's pack dips below 6.8 V on hard steps. At the defaults the guard also limited torque during normal walking, and the robot fell on its face at full speed. 6.5 V with 70 % torque is a better starting point there. A lower threshold or more torque gives stronger walking but more risk of a cut on falls. Frequent triggers while walking mean the supply needs fixing.
 
 ### Last walk
 

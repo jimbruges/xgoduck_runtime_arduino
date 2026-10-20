@@ -64,7 +64,9 @@ static void receiveCal(MsgPack::bin_t<uint8_t> bytes) {
     valid = memcmp(pkt.magic, "DQL1", 4) == 0 && pkt.op <= CAL_SET_GAINS;
     if (pkt.op == CAL_SET_GAINS)
       valid = valid && pkt.raw[0] >= 1 && pkt.raw[0] <= 64 && pkt.raw[1] <= 100 &&
-              pkt.raw[2] >= 1 && pkt.raw[2] <= 64;
+              pkt.raw[2] >= 1 && pkt.raw[2] <= 64 &&
+              (pkt.raw[3] == 0 || (pkt.raw[3] >= 55 && pkt.raw[3] <= 80)) &&
+              pkt.raw[4] >= 20 && pkt.raw[4] <= 100;
     if (pkt.op == CAL_FINISH_ONE) valid = valid && pkt.index < NUM_MOTORS;
     if (pkt.op == CAL_SET_RAW || pkt.op == CAL_SET_ZEROS) {
       for (unsigned i = 0; i < NUM_MOTORS; ++i) {
@@ -109,7 +111,7 @@ static void receiveServo(MsgPack::bin_t<uint8_t> bytes) {
 }
 
 static void fillRawPacket(RawPacket &r) {
-  memcpy(r.magic, "DQR2", 4);
+  memcpy(r.magic, "DQR3", 4);
   r.mask = servoRxMask;
   k_mutex_lock(&motorsMu, K_FOREVER);
   for (unsigned i = 0; i < NUM_MOTORS; ++i) {
@@ -120,6 +122,8 @@ static void fillRawPacket(RawPacket &r) {
     if (motors[i].sign > 0) r.posSignMask |= 1u << i;
   }
   r.runKp = runKp;
+  r.guardV10 = guardV10;
+  r.guardPct = guardPct;
   r.runKd = runKd;
   k_mutex_unlock(&motorsMu);
 }
@@ -164,6 +168,8 @@ static void applyCalOp(const CalPacket &pkt) {
       runKp = (uint8_t)pkt.raw[0];
       runKd = (uint8_t)pkt.raw[1];
       runKpMouth = (uint8_t)pkt.raw[2];
+      guardV10 = (uint8_t)pkt.raw[3];
+      guardPct = (uint8_t)pkt.raw[4];
       // Calibration and servo setup use their own gains and restore these on exit.
       if (hostMode == HOST_NORMAL) setRunKpKd();
       break;
@@ -365,9 +371,16 @@ static void applyServoOp(const ServoPacket &pkt) {
 // Supply guard (see duck_config.h): 0 = full torque, 1 = limited, 2 = severe.
 static uint8_t supplyGuard(bool active, uint32_t now) {
   static uint8_t level = 0;
+  static uint16_t written = 1000;
   static uint32_t okSince = 0;
   uint8_t want = level;
-  if (!active) {
+  const uint8_t limitV10 = guardV10;
+  const uint8_t severeV10 = limitV10 > SUPPLY_SEVERE_DROP_V10 ? limitV10 - SUPPLY_SEVERE_DROP_V10 : 0;
+  const uint8_t restoreV10 = limitV10 + SUPPLY_RESTORE_RISE_V10;
+  const uint16_t limited = (uint16_t)guardPct * 10;
+  const uint16_t levels[3] = {1000, limited,
+                              limited < SUPPLY_SEVERE_PERMILLE ? limited : SUPPLY_SEVERE_PERMILLE};
+  if (!active || !limitV10) {
     want = 0;  // calibration, servo setup and torque-off use full torque again
     okSince = 0;
   } else {
@@ -379,20 +392,22 @@ static uint8_t supplyGuard(bool active, uint32_t now) {
     }
     k_mutex_unlock(&motorsMu);
     if (vmin == 0xFF) return level;  // no voltage this tick
-    const uint8_t sag = vmin < SUPPLY_SEVERE_V10 ? 2 : vmin < SUPPLY_LIMIT_V10 ? 1 : 0;
+    const uint8_t sag = vmin < severeV10 ? 2 : vmin < limitV10 ? 1 : 0;
     if (sag > level) {
       want = sag;  // tighten at once
       okSince = 0;
-    } else if (vmin >= SUPPLY_RESTORE_V10 && level > 0) {
+    } else if (vmin >= restoreV10 && level > 0) {
       if (!okSince) okSince = now ? now : 1;
       else if ((uint32_t)(now - okSince) >= SUPPLY_RESTORE_US) { want = level - 1; okSince = 0; }
     } else {
       okSince = 0;
     }
   }
-  if (want != level) {
-    level = want;
-    scsWriteWord(0xFE, ADDR_TORQUE_LIMIT, TORQUE_LIMIT_LEVELS[level]);  // broadcast, no reply
+  level = want;
+  // Also rewrites when the host changes the limited torque while it is active.
+  if (levels[level] != written) {
+    written = levels[level];
+    scsWriteWord(0xFE, ADDR_TORQUE_LIMIT, written);  // broadcast, no reply
     Serial1.flush();
   }
   return level;

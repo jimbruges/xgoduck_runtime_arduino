@@ -92,10 +92,10 @@ if(s.angles)$('joints').innerHTML=s.motors.map((id,i)=>`<tr class="${s.servo_ids
 let tuneBusy=false;
 function renderTuning(s){
   const b=s.battery_v;
-  const g=s.supply_guard||{};
+  const sg=s.supply_guard||{};
   $('battery').textContent=(b==null?'battery —':`battery ${b.toFixed(1)} V · max ${s.servo_temp_max??'—'} °C`)+
-    (g.level?` · torque limited (supply low)`:g.events?` · supply sagged ${g.events}× (last ${g.last})`:'');
-  $('battery').className=(b!=null&&b<7.4)||g.level?'warn-text':'';
+    (sg.level?` · torque limited (supply low)`:sg.events?` · supply sagged ${sg.events}× (last ${sg.last})`:'');
+  $('battery').className=(b!=null&&b<7.4)||sg.level?'warn-text':'';
   const t=s.tuning;if(!t||tuneBusy)return;
   document.querySelectorAll('[data-home]').forEach(x=>x.classList.toggle('active',x.dataset.home===t.home_source));
   if(document.activeElement!==$('cmd-tau')){$('cmd-tau').value=t.cmd_tau_s;$('cmd-tau-v').textContent=t.cmd_tau_s?t.cmd_tau_s.toFixed(2)+' s':'off';}
@@ -106,6 +106,10 @@ function renderTuning(s){
   const g=s.servo_gains;
   if(g){for(const k of ['kp','kd'])if(document.activeElement!==$('servo-'+k)){$('servo-'+k).value=g[k];$(`servo-${k}-v`).textContent=g[k];}
     $('gain-state').textContent=g.synced?'· applied':'· applying…';}
+  const gv=t.supply_guard_v??6.8, gp=t.supply_guard_torque_pct??50;
+  if(document.activeElement!==$('guard-v')){$('guard-v').value=gv||6.8;$('guard-v-v').textContent=gv?gv.toFixed(1)+' V':'off';}
+  if(document.activeElement!==$('guard-pct')){$('guard-pct').value=gp;$('guard-pct-v').textContent=gp+' %';}
+  $('guard-state').textContent=(gv?`${gv.toFixed(1)} V`:'off')+(g?(g.synced?' · applied':' · applying…'):'');
   if(t.walk_model&&document.activeElement!==$('walk-model')&&$('walk-model').value&&$('walk-model').value!==t.walk_model)$('walk-model').value=t.walk_model;
   const h=s.deployment&&s.deployment.home_deg;if(h)$('home-detail').textContent=`walk home now: hip pitch ${h[2].toFixed(1)}° / ankle ${h[4].toFixed(1)}° · knee ${h[3].toFixed(2)}°`;
 }
@@ -128,6 +132,11 @@ $('reset-imu').onclick=()=>setTuning({imu_bias_deg:[0,0,0]},'IMU level reset');
   $('servo-'+k).oninput=()=>{$(`servo-${k}-v`).textContent=$('servo-'+k).value;};
   $('servo-'+k).onchange=()=>setTuning({['servo_'+k]:+$('servo-'+k).value},`Servo ${k.toUpperCase()} set to ${$('servo-'+k).value}`);
 });
+$('guard-v').oninput=()=>{$('guard-v-v').textContent=(+$('guard-v').value).toFixed(1)+' V';};
+$('guard-v').onchange=()=>setTuning({supply_guard_v:+$('guard-v').value},`Supply guard starts below ${(+$('guard-v').value).toFixed(1)} V`);
+$('guard-pct').oninput=()=>{$('guard-pct-v').textContent=$('guard-pct').value+' %';};
+$('guard-pct').onchange=()=>setTuning({supply_guard_torque_pct:+$('guard-pct').value},`Supply guard keeps ${$('guard-pct').value} % torque`);
+$('guard-off').onclick=()=>{if(confirm('Turn the supply guard off? A sagging battery may then cut out on falls.'))setTuning({supply_guard_v:0},'Supply guard off');};
 async function refreshWalk(){
   try{
     const r=await (await fetch('/api/log/summary')).json();

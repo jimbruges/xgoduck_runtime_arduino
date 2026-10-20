@@ -27,6 +27,11 @@ DEFAULTS = {
     'home_lean_back_deg': 0.0,
     # Walk policy file in python/ (xgoduck_walk*.onnx), for A/B testing retrained models.
     'walk_model': 'xgoduck_walk.onnx',
+    # Supply guard: below this servo supply voltage (0 = off) the MCU caps every servo's
+    # torque at supply_guard_torque_pct, so a sagging battery recovers instead of cutting
+    # out. 0.6 V lower it caps at 20 % (or lower if that is set lower).
+    'supply_guard_v': 6.8,
+    'supply_guard_torque_pct': 50,
 }
 WALK_MODEL = re.compile(r'^xgoduck_walk[\w.-]*\.onnx$')
 MOUTH_KP = 10  # mouth servo run KP, as in firmware
@@ -60,6 +65,16 @@ def validate(values, base=None):
             if not math.isfinite(lean) or not -10 <= lean <= 15:
                 raise ValueError('home lean must be within -10..15°')
             out[key] = lean
+    if 'supply_guard_v' in values:
+        v = round(float(values['supply_guard_v']), 1)
+        if not math.isfinite(v) or not (v == 0 or 5.5 <= v <= 8.0):
+            raise ValueError('supply guard must be 0 (off) or within 5.5..8.0 V')
+        out['supply_guard_v'] = v
+    if 'supply_guard_torque_pct' in values:
+        pct = int(values['supply_guard_torque_pct'])
+        if not 20 <= pct <= 100:
+            raise ValueError('limited torque must be within 20..100 %')
+        out['supply_guard_torque_pct'] = pct
     if 'walk_model' in values:
         name = str(values['walk_model'])
         if not WALK_MODEL.match(name) or not (Path(__file__).parent / name).is_file():

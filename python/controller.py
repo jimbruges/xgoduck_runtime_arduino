@@ -229,11 +229,14 @@ class Controller:
     def _push_gains(self):
         t = self.tuning
         self.bridge.notify('duck_cal', encode_cal(CAL_SET_GAINS, mask=0,
-                           raw=[t['servo_kp'], t['servo_kd'], tuning.MOUTH_KP] + [0]*12))
+                           raw=[t['servo_kp'], t['servo_kd'], tuning.MOUTH_KP,
+                                round(t['supply_guard_v'] * 10), t['supply_guard_torque_pct']] + [0]*10))
         self._gains_sent = time.monotonic()
 
     def _gains_synced(self):
-        return self.mcu_gains == (self.tuning['servo_kp'], self.tuning['servo_kd'])
+        t = self.tuning
+        return self.mcu_gains == (t['servo_kp'], t['servo_kd'], round(t['supply_guard_v'] * 10),
+                                  t['supply_guard_torque_pct'])
 
     def _calibration_synced(self):
         return self.zero_pos == self.zero_target and self.mcu_sign_mask == self.sign_mask
@@ -256,7 +259,7 @@ class Controller:
             self.raw_mask = pkt['mask']
             self.mcu_sign_mask = pkt['pos_sign_mask']
             self.zero_pos = pkt['zero']
-            self.mcu_gains = (pkt['run_kp'], pkt['run_kd'])
+            self.mcu_gains = (pkt['run_kp'], pkt['run_kd'], pkt['guard_v10'], pkt['guard_pct'])
             # Zeros and directions live in MCU RAM: re-send after an MCU reset or a lost
             # message. The MCU holds one pending calibration message, so send at most one
             # per packet: a second would overwrite the first before the MCU reads it.
@@ -454,8 +457,8 @@ class Controller:
             new = tuning.validate(values, self.tuning)
             if new['walk_model'] != self.policy.file:
                 self._load_walk_model(new['walk_model'])
-            gains_changed = (new['servo_kp'], new['servo_kd']) != \
-                (self.tuning['servo_kp'], self.tuning['servo_kd'])
+            keys = ('servo_kp', 'servo_kd', 'supply_guard_v', 'supply_guard_torque_pct')
+            gains_changed = any(new[k] != self.tuning[k] for k in keys)
             with self.policy_lock:
                 self.tuning = new
                 self._apply_tuning()
@@ -1177,7 +1180,8 @@ class Controller:
                                          and self._calibration_synced() and self.offset_check['state'] == 'ok')
             result['calibration_synced']=self._calibration_synced()
             result['offset_check'] = dict(self.offset_check, scanning=self._offset_scanning)
-            result['supply_guard'] = dict(self.supply_guard)
+            result['supply_guard'] = dict(self.supply_guard, v=self.tuning['supply_guard_v'],
+                                          torque_pct=self.tuning['supply_guard_torque_pct'])
             result['servo_scan_version'] = 1
             present = [i for i in range(15) if self.raw_mask & (1 << i) and self.servo_volt[i]]
             result['battery_v'] = min(self.servo_volt[i] for i in present) / 10 if present else None
