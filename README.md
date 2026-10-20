@@ -330,6 +330,35 @@ The flight recorder lives in memory and is lost in a power cut. So the app also 
 
 What to look for: a supply voltage that sags under load before the end points at a current or protection trip. Steady voltage until a sudden end at an impact points at the power path being knocked: a switch, the battery contacts or a connector.
 
+### Power cuts when falling (supply guard)
+
+**What was found.** On the development robot the whole robot lost power on backward falls and stayed off until the power switch was cycled. Replacing the Uno Q did not help. The black box showed the cause is the supply, not the board or a loose connection:
+
+| Moment | Lowest servo supply |
+| --- | --- |
+| Resting, torque off | 8.0–8.1 V |
+| Walking (median) | 7.5 V |
+| Hard steps | dips to 6.5–6.9 V |
+| Last 0.1 s, tipping backward past 36° with the legs swinging at up to 850°/s | 5.8 V, then the record ends |
+
+All 15 servos answered to the last record, so nothing came loose. The supply sagged, and the power protection (most likely the 2S pack's BMS) cut out and latched off. The cut came before the fall detector fired (55° for 0.15 s), so it is the walk policy fighting the fall that draws the spike. A sag of 2 V or more means a few tenths of an ohm in the power path, far more than good high-drain cells and a properly rated BMS have.
+
+**Hardware fix (recommended).** With a multimeter across the battery while the robot walks or stamps:
+
+- If the battery itself drops about 2 V, the cells or the BMS are the limit. Use high-drain cells (for example Molicel P26A, Samsung 25R or 30Q) and a 2S BMS rated for at least 10 A continuous.
+- If the battery stays near 8 V while the servos report 6 V, look at the wiring and connectors between the battery and the servos.
+
+**Supply guard (firmware).** While Default pose or Walk is on, the MCU checks every servo's supply voltage each 10 ms tick:
+
+- Below **6.8 V**, every servo's torque limit (register 48) drops to **50 %**.
+- Below **6.2 V**, it drops to **20 %**, close to limp but still holding position.
+- Once every servo reads 7.3 V or more for 0.3 s, the limit steps back up one level at a time.
+- With torque off, and in calibration and servo setup, the limit is always 100 %.
+
+Capping torque caps the current, so the supply recovers instead of reaching the protection's cut-off. The thresholds are in `sketch/duck_config.h` (`SUPPLY_LIMIT_V10`, `SUPPLY_SEVERE_V10`, `SUPPLY_RESTORE_V10`). The Control page shows *torque limited (supply low)* next to the battery figure while it is active, and how many times it has triggered. The black box logs it as `lim` (0, 1 or 2).
+
+Trade-off: on a pack that already dips below 6.8 V on hard steps, the guard also limits torque briefly during normal walking, which can make walking weaker. If it triggers often while walking, that is the sign to fix the supply. Lowering the thresholds trades walking strength against the risk of a cut.
+
 ### Last walk
 
 - **What:** a summary of the flight recorder (`GET /api/log/summary`). For walking forward, backward, turning and standing it gives the follow ratio (achieved over commanded leg swing, 1.0 = all of it) and the delay, plus falls and the resting pitch. It covers all walking in the recorder's last 20 s and updates every 2 s.

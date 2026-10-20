@@ -362,6 +362,42 @@ static void applyServoOp(const ServoPacket &pkt) {
   k_mutex_unlock(&hostMu);
 }
 
+// Supply guard (see duck_config.h): 0 = full torque, 1 = limited, 2 = severe.
+static uint8_t supplyGuard(bool active, uint32_t now) {
+  static uint8_t level = 0;
+  static uint32_t okSince = 0;
+  uint8_t want = level;
+  if (!active) {
+    want = 0;  // calibration, servo setup and torque-off use full torque again
+    okSince = 0;
+  } else {
+    uint8_t vmin = 0xFF;
+    k_mutex_lock(&motorsMu, K_FOREVER);
+    for (unsigned i = 0; i < NUM_MOTORS; ++i) {
+      if ((servoRxMask & (1u << i)) && motors[i].fbVolt && motors[i].fbVolt < vmin)
+        vmin = motors[i].fbVolt;
+    }
+    k_mutex_unlock(&motorsMu);
+    if (vmin == 0xFF) return level;  // no voltage this tick
+    const uint8_t sag = vmin < SUPPLY_SEVERE_V10 ? 2 : vmin < SUPPLY_LIMIT_V10 ? 1 : 0;
+    if (sag > level) {
+      want = sag;  // tighten at once
+      okSince = 0;
+    } else if (vmin >= SUPPLY_RESTORE_V10 && level > 0) {
+      if (!okSince) okSince = now ? now : 1;
+      else if ((uint32_t)(now - okSince) >= SUPPLY_RESTORE_US) { want = level - 1; okSince = 0; }
+    } else {
+      okSince = 0;
+    }
+  }
+  if (want != level) {
+    level = want;
+    scsWriteWord(0xFE, ADDR_TORQUE_LIMIT, TORQUE_LIMIT_LEVELS[level]);  // broadcast, no reply
+    Serial1.flush();
+  }
+  return level;
+}
+
 static void controlTask(void*, void*, void*) {
   Serial1.begin(SERVO_BAUD);
   enableUartFifo(reinterpret_cast<USART_TypeDef*>(DT_REG_ADDR(DT_PHANDLE_BY_IDX(DT_PATH(zephyr_user), serials, 0))));
@@ -472,10 +508,12 @@ static void controlTask(void*, void*, void*) {
     }
     parseServoRx();
     if (imu.ok) lastHealthyUs = micros();
+    const uint8_t guard = supplyGuard(enabled && hostMode == HOST_NORMAL, micros());
     StatePacket s = {};
     memcpy(s.magic, "DQS1", 4); s.version = 1;
     s.flags = (imu.ok ? 1 : 0) | (enabled ? 2 : 0) | (timedOut ? 4 : 0) |
-              ((hostMode == HOST_CAL) ? 8 : 0) | ((hostMode == HOST_SERVO_DEBUG) ? 16 : 0);
+              ((hostMode == HOST_CAL) ? 8 : 0) | ((hostMode == HOST_SERVO_DEBUG) ? 16 : 0) |
+              (guard ? 32 : 0) | (guard == 2 ? 64 : 0);
     s.servoMask = servoRxMask; s.seq = ++seq; s.sampleUs = start; s.imuUs = lastImuUs;
     s.commandSeq = acceptedSeq; s.commandAgeUs = haveCommand ? start-lastCommandUs : UINT32_MAX;
     s.periodUs = period; s.overruns = overruns; s.invalidCommands = bad;

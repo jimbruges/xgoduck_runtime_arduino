@@ -60,6 +60,11 @@ class Feedback:
     def servo_debugging(self):
         return bool(self.flags & 16)
 
+    @property
+    def supply_guard(self):
+        """MCU supply guard: 0 full torque, 1 limited to 50 %, 2 limited to 20 %."""
+        return 2 if self.flags & 64 else 1 if self.flags & 32 else 0
+
 def decode_state(data):
     if not isinstance(data, (bytes, bytearray)) or len(data) != STATE.size:
         raise ValueError('expected 240-byte state')

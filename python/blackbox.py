@@ -8,7 +8,8 @@ after an unexpected power-off, that file ends at the cut.
 
 Each record: t (Unix s), mode, phase, en (torque enabled), tilt (largest angle from upright in the window, deg, as the fall detector sees it),
 acc (peak |acceleration| in the window, m/s²; the IMU saturates near 2 g = 19.6), gyro
-(peak |rate|, deg/s), srv (fewest servos answering in a window tick), vmin/vmax (servo
+(peak |rate|, deg/s), srv (fewest servos answering in a window tick), lim (MCU supply
+guard: 0 full torque, 1 limited to 50 %, 2 to 20 %), vmin/vmax (servo
 supply, V, from the latest raw packet), tmax (hottest servo, °C).
 """
 import json
@@ -45,10 +46,11 @@ class BlackBox:
         servos = bin(fb.mask).count('1')
         w = self.window
         if w is None:
-            self.window = w = {'start': now, 'acc': 0.0, 'gyro': 0.0, 'srv': 15, 'tilt': 0.0}
+            self.window = w = {'start': now, 'acc': 0.0, 'gyro': 0.0, 'srv': 15, 'tilt': 0.0, 'lim': 0}
         w['acc'] = max(w['acc'], acc)
         w['gyro'] = max(w['gyro'], gyro)
         w['srv'] = min(w['srv'], servos)
+        w['lim'] = max(w['lim'], getattr(fb, 'supply_guard', 0))
         if tilt is not None:
             w['tilt'] = max(w['tilt'], tilt)
         if now - w['start'] < WINDOW_S:
@@ -56,7 +58,7 @@ class BlackBox:
         present = [v for i, v in enumerate(volts) if servo_mask >> i & 1 and v]
         record = {'t': round(time.time(), 2), 'mode': mode, 'phase': phase, 'en': int(fb.enabled),
                   'tilt': round(w['tilt'], 1), 'acc': round(w['acc'], 1), 'gyro': round(w['gyro']),
-                  'srv': w['srv'],
+                  'srv': w['srv'], 'lim': w['lim'],
                   'vmin': min(present) / 10 if present else None,
                   'vmax': max(present) / 10 if present else None,
                   'tmax': max((t for i, t in enumerate(temps) if servo_mask >> i & 1), default=None)}

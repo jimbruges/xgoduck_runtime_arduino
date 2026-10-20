@@ -153,6 +153,7 @@ class Controller:
         self._fall_target = None  # ramped get-up start pose while in the fall hold
         self._offset_touched = set()  # IDs recalibrated or rewritten since the last scan
         self._servo_seen = [0.0]*15   # when each servo last answered (state packets)
+        self.supply_guard = dict(level=0, events=0, last=None)  # MCU torque limit on low supply
         try:
             self.blackbox = blackbox.BlackBox()
         except OSError:
@@ -314,6 +315,11 @@ class Controller:
                     # reloaded its offset from EEPROM, so check it before trusting its zero.
                     returned |= now - self._servo_seen[i] > 0.5
                     self._servo_seen[i] = now
+            guard = fb.supply_guard
+            if guard > self.supply_guard['level']:
+                self.supply_guard['events'] += 1
+                self.supply_guard['last'] = time.strftime('%H:%M:%S')
+            self.supply_guard['level'] = guard
             if self.blackbox:
                 self.blackbox.sample(now, fb, self.mode, self.recovery.phase, self.recovery.angle_deg,
                                      self.servo_volt, self.servo_temp, self.raw_mask)
@@ -1171,6 +1177,7 @@ class Controller:
                                          and self._calibration_synced() and self.offset_check['state'] == 'ok')
             result['calibration_synced']=self._calibration_synced()
             result['offset_check'] = dict(self.offset_check, scanning=self._offset_scanning)
+            result['supply_guard'] = dict(self.supply_guard)
             result['servo_scan_version'] = 1
             present = [i for i in range(15) if self.raw_mask & (1 << i) and self.servo_volt[i]]
             result['battery_v'] = min(self.servo_volt[i] for i in present) / 10 if present else None

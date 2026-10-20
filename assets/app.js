@@ -92,8 +92,10 @@ if(s.angles)$('joints').innerHTML=s.motors.map((id,i)=>`<tr class="${s.servo_ids
 let tuneBusy=false;
 function renderTuning(s){
   const b=s.battery_v;
-  $('battery').textContent=b==null?'battery —':`battery ${b.toFixed(1)} V · max ${s.servo_temp_max??'—'} °C`;
-  $('battery').className=b!=null&&b<7.4?'warn-text':'';
+  const g=s.supply_guard||{};
+  $('battery').textContent=(b==null?'battery —':`battery ${b.toFixed(1)} V · max ${s.servo_temp_max??'—'} °C`)+
+    (g.level?` · torque limited (supply low)`:g.events?` · supply sagged ${g.events}× (last ${g.last})`:'');
+  $('battery').className=(b!=null&&b<7.4)||g.level?'warn-text':'';
   const t=s.tuning;if(!t||tuneBusy)return;
   document.querySelectorAll('[data-home]').forEach(x=>x.classList.toggle('active',x.dataset.home===t.home_source));
   if(document.activeElement!==$('cmd-tau')){$('cmd-tau').value=t.cmd_tau_s;$('cmd-tau-v').textContent=t.cmd_tau_s?t.cmd_tau_s.toFixed(2)+' s':'off';}

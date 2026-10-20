@@ -35,6 +35,18 @@ static const uint8_t ADDR_POS_OFFSET = 31;  // EEPROM; servo reports (encoder - 
 // Writing this to ADDR_TORQUE makes the servo store an offset so its present position reads 2048.
 static const uint8_t TORQUE_SET_MIDDLE = 128;
 
+// Supply guard. A weak 2S pack sags under load; on the development robot walking took
+// it from 8.0 V to 6.5-6.9 V on hard steps, and a backward fall to 5.8 V, where the
+// power protection cut out and stayed off until the switch was cycled. While position
+// control is on, the MCU caps every servo's torque (RAM register 48, 0..1000 = 0..100 %
+// of max) when any servo reads below these supply voltages, which caps the current.
+static const uint8_t ADDR_TORQUE_LIMIT = 48;
+static const uint8_t SUPPLY_LIMIT_V10 = 68;    // below 6.8 V: 50 % torque
+static const uint8_t SUPPLY_SEVERE_V10 = 62;   // below 6.2 V: 20 % torque
+static const uint8_t SUPPLY_RESTORE_V10 = 73;  // every servo at 7.3 V or more...
+static const uint32_t SUPPLY_RESTORE_US = 300000;  // ...for 0.3 s: one level back up
+static const uint16_t TORQUE_LIMIT_LEVELS[3] = {1000, 500, 200};
+
 static const uint8_t TEMP_KP_RUN = 6;
 static const uint8_t TEMP_KD_RUN = 20;
 static const uint8_t TEMP_KP_MOUTH = 10;
