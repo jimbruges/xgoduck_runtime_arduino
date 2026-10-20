@@ -20,4 +20,5 @@ ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock --ser
 EOF
 systemctl daemon-reload
 systemctl restart arduino-router
-systemctl show arduino-router -p ExecStart
+# --no-pager: in a terminal systemctl pipes this through less, which waits for q.
+systemctl --no-pager show arduino-router -p ExecStart

@@ -216,6 +216,23 @@ Flips are stored on the robot in `data/joint_signs.json` (gitignored), as the li
 
 On the robot this fork was developed on, neck pitch (30) and head pitch (31) were reversed. Every other joint and the IMU matched.
 
+## New or replacement board
+
+Calibration lives in the servos, so it stays with the robot. These files hold the rest of the robot's settings, in `data/`: zeros, joint directions, walk tuning, controller mapping and the servo offset check. Before swapping an Uno Q, back them up from the computer:
+
+```bash
+sh tools/robot-data.sh backup
+```
+
+On the new board:
+
+1. Copy the app to `~/ArduinoApps/xgoduck`, for example `git archive --format=tar.gz -o xgoduck.tgz HEAD`, `adb push xgoduck.tgz /tmp/`, then `mkdir -p ~/ArduinoApps/xgoduck && tar -xzf /tmp/xgoduck.tgz -C ~/ArduinoApps/xgoduck` on the board.
+2. Connect it to Wi-Fi. The first build downloads the pinned board core and the Python packages. A new board can also boot days behind, and HTTPS fails until its clock syncs.
+3. On the board, from the app directory, run `sh tools/setup-board.sh`. It checks internet and the clock and enables lingering, which a fresh board lacks and the Bluetooth helper needs. It sets the router to 2 Mbps (asks for sudo), patches the Bridge libraries, installs the Bluetooth helper and makes this the app that starts at boot. It is safe to re-run, and lists anything left to do.
+4. From the computer, `sh tools/robot-data.sh restore checkpoints/robot-data-<date>`, then start the app.
+
+Without a backup, the defaults apply: recalibrate, then redo the Check page flips, IMU level and controller mapping. A paired controller must be paired again; bonds belong to the board.
+
 ## Running
 
 Pinned stack: App CLI with Arduino Zephyr core 1.0.0, RouterBridge 0.4.3, RPClite 0.3.1, MsgPack 0.4.2. `sketch/sketch.yaml` lists those libraries, including the transitive ones. Python packages are installed by the App build from `python/requirements.txt`.
