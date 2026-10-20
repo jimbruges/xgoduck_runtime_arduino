@@ -53,13 +53,13 @@
 <dt>Tune</dt><dd>One step at a time (KP +2, or KD −6), Clear, walk, compare Last walk. Stop if a servo buzzes, the robot shakes standing, or a temperature climbs past about 50 °C.</dd></dl></div>
 
 <div class="tune-card"><small>Supply guard · starts below <span id="guard-state"></span></small>
-<div class="tune-row"><input id="guard-v" type="range" min="5.5" max="8.0" step="0.1" value="6.8"><code id="guard-v-v">6.8 V</code></div>
+<div class="tune-row"><input id="guard-v" type="range" min="5.5" max="8.0" step="0.1" value="6.5"><code id="guard-v-v">6.5 V</code></div>
 <small>Torque kept while limited</small>
-<div class="tune-row"><input id="guard-pct" type="range" min="20" max="100" step="5" value="50"><code id="guard-pct-v">50 %</code></div>
+<div class="tune-row"><input id="guard-pct" type="range" min="20" max="100" step="5" value="70"><code id="guard-pct-v">70 %</code></div>
 <button id="guard-off">Turn off</button>
 <dl class="why"><dt>What</dt><dd>While Default pose or Walk is on, the MCU checks every servo's supply each 10 ms. If any reads below this voltage, every servo is capped at this much torque. 0.6 V lower, the cap drops to 20 %. Once all servos are 0.5 V above the threshold for 0.3 s, the cap steps back up. The battery figure shows when it is active and how often it has triggered.</dd>
 <dt>Why</dt><dd>The battery sags under load: 7.5 V walking, 6.5–6.9 V on hard steps, and 5.8 V in a backward fall, where the power protection cut out and stayed off until the switch was cycled. Capping torque caps the current, so the supply recovers instead.</dd>
-<dt>Tune</dt><dd>If walking is weak or it falls at full speed, lower the voltage (6.4–6.6 V) or keep more torque (60–70 %) first. If the robot then cuts out on falls again, step back. Frequent triggers while walking mean the battery is the limit: use high-drain cells and a BMS rated 10 A or more.</dd></dl></div>
+<dt>Tune</dt><dd>Default 6.5 V and 70 %: on the development robot that kept power on falls and walked well at full speed (6.8 V and 50 % weakened walking). If walking is weak, lower the voltage or keep more torque. If the robot then cuts out on falls again, step back. Frequent triggers while walking mean the battery is the limit: use high-drain cells and a BMS rated 10 A or more.</dd></dl></div>
 
 <div class="tune-card"><small>Last walk (flight recorder)</small>
 <div id="walk-summary" class="walk-summary">—</div><div class="tune-row"><button id="walk-refresh">Refresh</button><button id="walk-clear">Clear</button></div>

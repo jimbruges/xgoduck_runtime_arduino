@@ -106,8 +106,8 @@ function renderTuning(s){
   const g=s.servo_gains;
   if(g){for(const k of ['kp','kd'])if(document.activeElement!==$('servo-'+k)){$('servo-'+k).value=g[k];$(`servo-${k}-v`).textContent=g[k];}
     $('gain-state').textContent=g.synced?'· applied':'· applying…';}
-  const gv=t.supply_guard_v??6.8, gp=t.supply_guard_torque_pct??50;
-  if(document.activeElement!==$('guard-v')){$('guard-v').value=gv||6.8;$('guard-v-v').textContent=gv?gv.toFixed(1)+' V':'off';}
+  const gv=t.supply_guard_v??6.5, gp=t.supply_guard_torque_pct??70;
+  if(document.activeElement!==$('guard-v')){$('guard-v').value=gv||6.5;$('guard-v-v').textContent=gv?gv.toFixed(1)+' V':'off';}
   if(document.activeElement!==$('guard-pct')){$('guard-pct').value=gp;$('guard-pct-v').textContent=gp+' %';}
   $('guard-state').textContent=(gv?`${gv.toFixed(1)} V`:'off')+(g?(g.synced?' · applied':' · applying…'):'');
   if(t.walk_model&&document.activeElement!==$('walk-model')&&$('walk-model').value&&$('walk-model').value!==t.walk_model)$('walk-model').value=t.walk_model;

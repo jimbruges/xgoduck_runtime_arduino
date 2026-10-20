@@ -42,8 +42,8 @@ static const uint8_t TORQUE_SET_MIDDLE = 128;
 // of max) when any servo reads below these supply voltages, which caps the current.
 static const uint8_t ADDR_TORQUE_LIMIT = 48;
 // Defaults; the host sets both from Walk tuning (CAL_SET_GAINS raw[3], raw[4]).
-static const uint8_t SUPPLY_LIMIT_V10 = 68;   // below 6.8 V: limit torque (0 = guard off)
-static const uint8_t SUPPLY_LIMIT_PCT = 50;   // to this % of max torque
+static const uint8_t SUPPLY_LIMIT_V10 = 65;   // below 6.5 V: limit torque (0 = guard off)
+static const uint8_t SUPPLY_LIMIT_PCT = 70;   // to this % of max torque
 // Derived: 0.6 V lower, torque goes to at most 20 %; every servo at 0.5 V above the
 // threshold for 0.3 s steps the limit back up one level.
 static const uint8_t SUPPLY_SEVERE_DROP_V10 = 6;

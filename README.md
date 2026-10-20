@@ -328,7 +328,7 @@ To retrain: in the xgoduck_rl fork, run `uv run hf auth login`, then `uv run tra
 
 - **What:** the threshold below which every servo's torque is capped, and how much torque is kept. 0.6 V lower it caps at 20 %; *Turn off* disables it. See [Power cuts when falling](#power-cuts-when-falling-supply-guard).
 - **Why:** the battery sags under load, and a backward fall took it to 5.8 V, where the power protection cut out and latched off.
-- **Tune:** if walking is weak or it falls at full speed, lower the threshold (6.4–6.6 V) or keep more torque (60–70 %). If falls cut the power again, step back.
+- **Tune:** defaults 6.5 V and 70 %, which kept power on falls and walked well at full speed on the development robot. If walking is weak, lower the threshold or keep more torque; if falls cut the power again, step back.
 
 ### Black box (power cuts)
 
@@ -354,7 +354,7 @@ All 15 servos answered to the last record, so nothing came loose. The supply sag
 - If the battery itself drops about 2 V, the cells or the BMS are the limit. Use high-drain cells (for example Molicel P26A, Samsung 25R or 30Q) and a 2S BMS rated for at least 10 A continuous.
 - If the battery stays near 8 V while the servos report 6 V, look at the wiring and connectors between the battery and the servos.
 
-**Supply guard (firmware, set in Walk tuning).** While Default pose or Walk is on, the MCU checks every servo's supply voltage each 10 ms tick. Two settings on the Control page's **Supply guard** card control it (defaults 6.8 V and 50 %):
+**Supply guard (firmware, set in Walk tuning).** While Default pose or Walk is on, the MCU checks every servo's supply voltage each 10 ms tick. Two settings on the Control page's **Supply guard** card control it (defaults 6.5 V and 70 %):
 
 - Below the **threshold**, every servo's torque limit (register 48) drops to the **torque kept** setting.
 - 0.6 V below the threshold, it drops to 20 % (or the torque setting, if lower), close to limp but still holding position.
@@ -363,7 +363,7 @@ All 15 servos answered to the last record, so nothing came loose. The supply sag
 
 Capping torque caps the current, so the supply recovers instead of reaching the protection's cut-off. Both settings travel with the servo gains, and the card shows *applied* once the MCU has echoed them back. The Control page shows *torque limited (supply low)* next to the battery figure while it is active, and how many times it has triggered. The black box logs it as `lim` (0, 1 or 2).
 
-Trade-off: the development robot's pack dips below 6.8 V on hard steps. At the defaults the guard also limited torque during normal walking, and the robot fell on its face at full speed. 6.5 V with 70 % torque is a better starting point there. A lower threshold or more torque gives stronger walking but more risk of a cut on falls. Frequent triggers while walking mean the supply needs fixing.
+Trade-off: the development robot's pack dips below 6.8 V on hard steps. At first the guard was set at 6.8 V and 50 %: it also limited torque during normal walking, and the robot fell on its face at full speed. At 6.5 V and 70 %, now the defaults, it kept power on falls and walked well at full speed. A lower threshold or more torque gives stronger walking but more risk of a cut on falls. Frequent triggers while walking mean the supply needs fixing.
 
 ### Last walk
 

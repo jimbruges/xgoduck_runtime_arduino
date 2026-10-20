@@ -30,8 +30,10 @@ DEFAULTS = {
     # Supply guard: below this servo supply voltage (0 = off) the MCU caps every servo's
     # torque at supply_guard_torque_pct, so a sagging battery recovers instead of cutting
     # out. 0.6 V lower it caps at 20 % (or lower if that is set lower).
-    'supply_guard_v': 6.8,
-    'supply_guard_torque_pct': 50,
+    # 6.5 V / 70 % kept power on falls on the development robot and still walked well at
+    # full speed; 6.8 V / 50 % also kept power but weakened walking.
+    'supply_guard_v': 6.5,
+    'supply_guard_torque_pct': 70,
 }
 WALK_MODEL = re.compile(r'^xgoduck_walk[\w.-]*\.onnx$')
 MOUTH_KP = 10  # mouth servo run KP, as in firmware
