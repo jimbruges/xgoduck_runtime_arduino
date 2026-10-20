@@ -16,6 +16,7 @@ import pad
 import tuning
 import flight
 import offsets
+import blackbox
 
 FACTORY_ZERO = [
     2236, 2005, 1912, 1866, 1945,
@@ -152,6 +153,10 @@ class Controller:
         self._fall_target = None  # ramped get-up start pose while in the fall hold
         self._offset_touched = set()  # IDs recalibrated or rewritten since the last scan
         self._servo_seen = [0.0]*15   # when each servo last answered (state packets)
+        try:
+            self.blackbox = blackbox.BlackBox()
+        except OSError:
+            self.blackbox = None
 
     def _load_zeros(self):
         try:
@@ -309,6 +314,9 @@ class Controller:
                     # reloaded its offset from EEPROM, so check it before trusting its zero.
                     returned |= now - self._servo_seen[i] > 0.5
                     self._servo_seen[i] = now
+            if self.blackbox:
+                self.blackbox.sample(now, fb, self.mode, self.recovery.phase, self.recovery.angle_deg,
+                                     self.servo_volt, self.servo_temp, self.raw_mask)
             if returned:
                 self._offset_scan_wanted = True
                 if self.mode in ('hold', 'policy'):

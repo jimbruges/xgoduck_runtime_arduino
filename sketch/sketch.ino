@@ -513,7 +513,9 @@ static void reportTask(void*, void*, void*) {
     memcpy(bytes.data(), &snapshot, sizeof(snapshot));
     k_mutex_unlock(&stateMu);
     Bridge.notify("duck_state", bytes);
-    const bool wantRaw = rawNotifyEveryTick || ((reports % 20) == 0);
+    // Raw packets carry servo voltage; 25 Hz lets the host black box catch a supply sag
+    // in the moments before a power cut (5 Hz missed them).
+    const bool wantRaw = rawNotifyEveryTick || ((reports % 4) == 0);
     if (wantRaw) {
       RawPacket raw = {};
       fillRawPacket(raw);

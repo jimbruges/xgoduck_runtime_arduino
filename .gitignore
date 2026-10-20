@@ -11,3 +11,4 @@ tests/
 # local robot backups
 checkpoints/
 data/servo_offsets.json
+data/blackbox/

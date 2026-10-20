@@ -324,6 +324,12 @@ To retrain: in the xgoduck_rl fork, run `uv run hf auth login`, then `uv run tra
 - **Why:** the flight recorder showed the legs achieving only about 40–50% of each commanded swing, about 85 ms late; the policy then over-corrects. Training assumed servo P = 5 (`kp_fw=5`) and a 4 ms command delay. Upstream Microduck runs its servos with no damping, because damping makes them slow.
 - **Tune:** one step at a time (KP +2, or KD −6): **Clear**, walk the same sequence, compare **Last walk**. Stop if a servo buzzes, the robot shakes while standing, or a temperature climbs past about 50 °C.
 
+### Black box (power cuts)
+
+The flight recorder lives in memory and is lost in a power cut. So the app also writes a compact record about 20 times a second to `data/blackbox/current.jsonl` and syncs it to storage every 0.25 s. Each record holds the mode, recovery phase, tilt, peak acceleration and rotation rate, how many servos answered, servo supply voltage (min and max) and the hottest servo. At each start the previous run's file becomes `previous.jsonl`, so after an unexpected power-off it ends at the cut. Read it at `/api/blackbox/previous` (the last 30 s), or this run's at `/api/blackbox/current`.
+
+What to look for: a supply voltage that sags under load before the end points at a current or protection trip. Steady voltage until a sudden end at an impact points at the power path being knocked: a switch, the battery contacts or a connector.
+
 ### Last walk
 
 - **What:** a summary of the flight recorder (`GET /api/log/summary`). For walking forward, backward, turning and standing it gives the follow ratio (achieved over commanded leg swing, 1.0 = all of it) and the delay, plus falls and the resting pitch. It covers all walking in the recorder's last 20 s and updates every 2 s.

@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from arduino.app_utils import App, Bridge
 from arduino.app_bricks.web_ui import WebUI
 from controller import Controller
+import blackbox
 
 # Bound GIL handoff latency between the 100 Hz receiver, policy and WebUI.
 sys.setswitchinterval(0.001)
@@ -126,6 +127,10 @@ def pad_config_set(body: dict):
 ui.expose_api('GET', '/api/status', controller.status)
 ui.expose_api('GET', '/api/log', controller.flight_log)
 ui.expose_api('GET', '/api/log/summary', controller.flight_summary)
+# Crash-safe telemetry (python/blackbox.py): the last 30 s of the run before this app start
+# (it ends at a power cut) or of this run.
+ui.expose_api('GET', '/api/blackbox/previous', lambda: blackbox.read('previous', 30))
+ui.expose_api('GET', '/api/blackbox/current', lambda: blackbox.read('current', 30))
 ui.expose_api('POST', '/api/log/clear', log_clear)
 ui.expose_api('POST', '/api/joint_sign', joint_sign_set)
 ui.expose_api('POST', '/api/joint_sign/reset', joint_sign_reset)
