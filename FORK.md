@@ -30,16 +30,17 @@ The original walk policy was trained on a model without the Uno Q, shield and ba
 - current xgoduck_rl's ±15 mm centre-of-mass randomisation;
 - an 8–24 ms randomised command delay, matching this runtime.
 
-There are two retrains, differing only in where the extra mass sits:
+There are three retrains, differing only in the mass and where it sits:
 
 | Model | Branch | Mass placement | Whole-robot CoM vs upstream |
 |---|---|---|---|
 | `xgoduck_walk_realcom.onnx` | `real-mass-com` | battery, Uno Q, shield and cover (~143 g) all behind the body at x −55 mm | 8 mm back |
 | `xgoduck_walk_cadbattery.onnx` | `cad-battery` | positions from the [CAD assembly](https://github.com/jimbruges/xgoduck_hardware/blob/master/structure/assembly/xgoduck_full_assembly.solidcraft): battery (~95 g) inside the body at x −20 mm, Uno Q, shield, cover and connectors (~48 g) behind it at x −51 mm | 3.7 mm back |
+| `xgoduck_walk_backcover.onnx` | `back-cover` | the screw-on back cover design: battery as above, battery-mount bosses (~8 g), Uno Q and shield (~35 g) 6.9 mm closer to the body at x −43 mm, back cover (16 g) at x −53 mm; ~836 g in all (estimated, not weighed) | 4.0 mm back |
 
 The CAD check found the first retrain over-corrected: the 18650 cells sit in the body, in front of the Uno Q, not behind it. The CAD has no real masses (every part uses one default density), so the 95/48 g split is an estimate. Weighing the battery pack and the Uno Q stack would pin it down.
 
-It was trained with Hugging Face Jobs (`--hf-jobs`, L4 GPU, about 3 h and $3) and exported with `scripts/export.py`. **Walk policy** in Walk tuning switches between `xgoduck_walk.onnx` and any other `python/xgoduck_walk*.onnx` for A/B testing.
+Each was trained with Hugging Face Jobs (`--hf-jobs`, L4 GPU, about 3 h and $3) and exported with `scripts/export.py`. **Walk policy** in Walk tuning switches between `xgoduck_walk.onnx` and any other `python/xgoduck_walk*.onnx` for A/B testing.
 
 ## Calibration no longer starts every servo at once
 
