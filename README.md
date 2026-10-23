@@ -179,7 +179,7 @@ So the host keeps a reference copy of every servo's offset in `data/servo_offset
 
 | Symptom | What to do |
 | --- | --- |
-| A row shows **encoder … out of range** and its slider is locked | The joint is past the encoder wrap. Move it to zero by hand and press **Finish**; that re-centres it. |
+| A row shows **encoder … out of range** (above 4095 or negative) and its slider is locked | The servo counted a turn: while powered it adds 4096 for each time the joint crosses the encoder's wrap point, and that count only clears when the servo loses power. Move the joint to zero and press **Finish**: it writes the right offset and saves the zero, and says if the servo still needs a power cycle. When calibration is done, turn the servo power off and on; the joint then reads 2048 at zero, mid-range, so normal movement never crosses the wrap again. Default pose and Walk are refused while any joint reads out of range, because they would drive it a whole turn. |
 | **Finish** reports that the joint *did not confirm the offset change* | The servo did not answer. Check its cable and the servo supply, then press Finish again. The zero was not changed. |
 | Default pose and Walk are refused with *Servo calibration changed on ID …* | That servo's stored offset no longer matches its calibration (see [Offset check](#offset-check)). Recalibrate that joint and exit Calibration. |
 | After a restart a joint goes back to where it was before calibrating | Its offset never reached the servo's EEPROM. Fixed in this firmware; recalibrate the joint once. |

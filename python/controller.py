@@ -238,6 +238,12 @@ class Controller:
         return self.mcu_gains == (t['servo_kp'], t['servo_kd'], round(t['supply_guard_v'] * 10),
                                   t['supply_guard_torque_pct'])
 
+    def _out_of_range_ids(self):
+        """Servos reading outside 0..4095: they counted a turn since power-up (see
+        cal_finish), so position control would drive them a whole turn."""
+        return [MOTOR_IDS[i] for i, v in enumerate(self.raw_pos)
+                if self.raw_mask >> i & 1 and (v & 0x8000 or v > 4095)]
+
     def _calibration_synced(self):
         return self.zero_pos == self.zero_target and self.mcu_sign_mask == self.sign_mask
 
@@ -368,6 +374,11 @@ class Controller:
                     raise ValueError('checking the servo offsets; try again in a moment')
                 if self.offset_check['state'] == 'mismatch':
                     raise ValueError(self.offset_check['message'])
+                wrapped = self._out_of_range_ids()
+                if wrapped:
+                    raise ValueError(f'ID {", ".join(map(str, wrapped))} read{"s" if len(wrapped) == 1 else ""} '
+                                     'out of range: the servo counted a turn since power-up and would '
+                                     'be driven a whole turn. Turn the servo power off and on, then retry.')
             if mode == self.mode:
                 self.web_time = time.monotonic()
                 return {'mode': self.mode}
@@ -755,15 +766,23 @@ class Controller:
             seq = self.raw_seq
         try:
             # Confirm from three consecutive fresh readings of that servo after the change.
+            # These servos count whole turns while powered: a joint moved across the
+            # encoder wrap reads (encoder - offset) mod 4096 plus 4096 per turn (below 0 as
+            # sign-magnitude, or above 4095). The new offset is right, but the reading stays
+            # 2048 plus whole turns until the servo's power is cycled, so accept that.
             deadline = time.monotonic() + 1.2
-            good, raw = 0, None
+            good, raw, turns = 0, None, 0
             time.sleep(0.05)
             while good < 3:
                 with self.lock:
                     fresh = self.raw_seq != seq and self.raw_mask >> index & 1
                     seq, raw = self.raw_seq, int(self.raw_pos[index])
                 if fresh:
-                    good = good + 1 if abs(raw - CAL_ZERO) <= 12 else 0
+                    signed = -(raw & 0x7FFF) if raw & 0x8000 else raw
+                    off = (signed - CAL_ZERO) % 4096
+                    near = min(off, 4096 - off) <= 12
+                    good = good + 1 if near else 0
+                    turns = round((signed - CAL_ZERO) / 4096) if near else 0
                 if time.monotonic() > deadline:
                     raise ValueError(f'ID {MOTOR_IDS[index]} did not confirm the offset change '
                                      f'(reads {raw}); its zero was not changed. Press Finish again.')
@@ -780,7 +799,8 @@ class Controller:
             self._save_zeros()
             self.web_time = time.monotonic()
             return {'ok': True, 'index': index, 'zero_pos': self.zero_pos[index],
-                    'cal_done': list(self.cal_done)}
+                    'cal_done': list(self.cal_done), 'turns': turns,
+                    'needs_power_cycle': turns != 0}
 
     def _require_servo_debug(self):
         if self.mode != 'servo_debug':
@@ -1229,7 +1249,9 @@ class Controller:
                 cal_targets=list(self.cal_targets), raw_mask=self.raw_mask)
             result['imu_valid']=self._imu_valid(fb)
             result['control_ready']=bool(self._imu_valid(fb) and now-self.rx_time<.15 and self.mode not in EXCLUSIVE_MODES
-                                         and self._calibration_synced() and self.offset_check['state'] == 'ok')
+                                         and self._calibration_synced() and self.offset_check['state'] == 'ok'
+                                         and not self._out_of_range_ids())
+            result['out_of_range_ids'] = self._out_of_range_ids()
             result['calibration_synced']=self._calibration_synced()
             result['offset_check'] = dict(self.offset_check, scanning=self._offset_scanning)
             result['supply_guard'] = dict(self.supply_guard, v=self.tuning['supply_guard_v'],

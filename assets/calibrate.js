@@ -88,7 +88,9 @@ async function finish(i){
     else $(`val${i}`).textContent='off';
     $(`row${i}`).classList.add('done');
     $(`zero${i}`).textContent='zero '+r.zero_pos;
-    $('message').textContent=`Joint ${MOTORS[i]} zero saved as ${r.zero_pos}`;
+    $('message').textContent=r.needs_power_cycle
+      ?`Joint ${MOTORS[i]} zero saved. The servo still counts ${Math.abs(r.turns)} turn${Math.abs(r.turns)>1?'s':''} from before, so it reads out of range until its power is cycled: when calibration is done, turn the servo power off and on.`
+      :`Joint ${MOTORS[i]} zero saved as ${r.zero_pos}`;
     if(i<14)select(i+1);
   }catch(e){showError(e);}
   finally{finishing=false;queueTargets();}
@@ -153,8 +155,10 @@ setInterval(async()=>{
     if(s.last_error)$('message').textContent=s.last_error;
     if(s.cal_done)s.cal_done.forEach((d,i)=>$(`row${i}`).classList.toggle('done',!!d));
     if(s.raw_pos)s.raw_pos.forEach((v,i)=>{
-      const inRange=v>=0&&v<=4095;
-      $(`raw${i}`).textContent=inRange?'encoder '+v:`encoder ${v} out of range: slider locked, Finish still works`;
+      // Sign-magnitude: bit 15 marks a reading below 0. Out of range means the servo
+      // counted a turn since power-up; Finish still sets the right offset.
+      const inRange=v>=0&&v<=4095, signed=v&0x8000?-(v&0x7FFF):v;
+      $(`raw${i}`).textContent=inRange?'encoder '+v:`encoder ${signed}: out of range (the servo counted a turn). Slider locked; Finish at zero still works, then cycle servo power`;
       $(`raw${i}`).style.color=inRange?'':'#f1ca86';
       // The MCU will not power a joint whose reading is past the encoder range.
       $(`sl${i}`).disabled=!inRange;
