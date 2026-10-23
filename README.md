@@ -292,7 +292,13 @@ The section header shows the lowest servo supply voltage (register 62) and the h
 - **Why:** the original `xgoduck_walk.onnx` was trained without the battery and Uno Q at the back. Three retrains ([jimbruges/xgoduck_rl](https://github.com/jimbruges/xgoduck_rl)) use the robot's real mass, ±15 mm centre-of-mass randomisation and an 8–24 ms command delay. `xgoduck_walk_realcom.onnx` (branch `real-mass-com`) puts all the extra mass behind the body, so the centre of mass is 8 mm back. `xgoduck_walk_cadbattery.onnx` (branch `cad-battery`) places the battery inside the body and the Uno Q stack behind it, as in the CAD assembly, so the centre of mass is 3.7 mm back. `xgoduck_walk_backcover.onnx` (branch `back-cover`) models the screw-on back cover and battery mount at about 836 g, with the centre of mass 4.0 mm back; use it with that hardware.
 - **Tune:** compare both on the same walk using **Last walk**. Use Home pose **Model**, so each policy uses the home it was trained with (22° for the retrained one). It may need less Home lean. Switch only while not walking.
 
-To retrain: in the xgoduck_rl fork, run `uv run hf auth login`, then `uv run train Mjlab-Velocity-Flat-XgoDuck --env.scene.num-envs 4096 --agent.max_iterations 4000 --hf-jobs --no-wandb`. Download the final `model_*.pt` from the checkpoint repo and export it with `uv run python scripts/export.py Mjlab-Velocity-Flat-XgoDuck --checkpoint-file <model.pt> --onnx-file xgoduck_walk_<name>.onnx`. Copy the result to `python/` on the robot.
+To retrain: in the xgoduck_rl fork, run `uv run hf auth login`, then `uv run train Mjlab-Velocity-Flat-XgoDuck --env.scene.num-envs 4096 --agent.max_iterations 4000 --hf-jobs --no-wandb`. Download the final `model_*.pt` from the checkpoint repo and export it with `uv run python scripts/export.py Mjlab-Velocity-Flat-XgoDuck --checkpoint-file <model.pt> --onnx-file xgoduck_walk_<name>.onnx`. Then load it onto the robot with **Upload policy**.
+
+**Upload policy** (on the Walk policy card) sends an `.onnx` from the computer to the robot (`POST /api/walk_model/upload`). Before saving it to `python/`, the robot checks:
+- it loads with observation [1,61] and action [1,14];
+- its metadata has the same joint order as the current walk policy and a trained home (`default_joint_pos`), which Home pose **Model** needs. An export from `scripts/export.py` has both.
+
+The name gets an `xgoduck_walk_` prefix if it lacks one. An existing file is only overwritten with **Replace** ticked, never the policy in use and never the original `xgoduck_walk.onnx`. Uploading does not switch to the policy; the page offers to switch afterwards. Uploaded policies live only on the robot and are not in git.
 
 ### Home pose (Table / Model)
 

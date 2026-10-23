@@ -164,4 +164,21 @@ async function loadWalkModels(){
   catch(_){}
 }
 $('walk-model').onchange=()=>setTuning({walk_model:$('walk-model').value},`Walk policy: ${$('walk-model').value}`);
+// Upload a walk policy (.onnx) from this computer; the robot validates it before saving.
+$('policy-upload').onclick=async()=>{
+  const f=$('policy-file').files[0], state=$('policy-upload-state');
+  if(!f){state.textContent='Choose an .onnx file first.';return;}
+  if(f.size>20e6){state.textContent='That file is over 20 MB; a walk policy is about 0.8 MB.';return;}
+  $('policy-upload').disabled=true;state.textContent=`Uploading ${f.name} (${(f.size/1e6).toFixed(2)} MB)…`;
+  try{
+    const data=await new Promise((ok,fail)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]);r.onerror=()=>fail(r.error);r.readAsDataURL(f);});
+    const r=await post('walk_model/upload',{name:f.name,data,replace:$('policy-replace').checked});
+    state.textContent=`Saved as ${r.name} · trained home ${r.home_hip_pitch_deg}° hip pitch${r.replaced?' · replaced the old file':''}`;
+    await loadWalkModels();
+    if(confirm(`Uploaded ${r.name}. Switch the walk policy to it now? (Only while not walking.)`)){
+      await setTuning({walk_model:r.name},`Walk policy: ${r.name}`);await loadWalkModels();}
+    $('policy-file').value='';$('policy-replace').checked=false;
+  }catch(e){state.textContent='Upload failed: '+e.message;}
+  finally{$('policy-upload').disabled=false;}
+};
 loadWalkModels();

@@ -433,6 +433,58 @@ class Controller:
     def walk_models(self):
         return sorted(f.name for f in Path(__file__).parent.glob('xgoduck_walk*.onnx'))
 
+    UPLOAD_MAX_BYTES = 20_000_000
+
+    def upload_walk_model(self, name, data_b64, replace=False):
+        """Save an uploaded walk policy as python/xgoduck_walk*.onnx after checking that it
+        loads like the current one: observation [1,61], action [1,14], and export metadata
+        with the same joint order and a trained home (default_joint_pos), which Home pose
+        Model uses. Does not switch to it."""
+        import base64, binascii, os, re
+        stem = re.sub(r'[^\w.-]', '_', Path(str(name)).name)
+        stem = stem[:-5] if stem.lower().endswith('.onnx') else stem
+        if not stem.startswith('xgoduck_walk'):
+            stem = 'xgoduck_walk_' + stem
+        name = stem + '.onnx'
+        if not tuning.WALK_MODEL.match(name) or len(name) > 80:
+            raise ValueError(f'invalid policy name {name!r}')
+        if name == 'xgoduck_walk.onnx':
+            raise ValueError('xgoduck_walk.onnx is the original policy; upload under another name')
+        try:
+            data = base64.b64decode(str(data_b64), validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError('upload is not valid base64')
+        if not data or len(data) > self.UPLOAD_MAX_BYTES:
+            raise ValueError(f'policy file must be 1 byte to {self.UPLOAD_MAX_BYTES // 1_000_000} MB')
+        target = Path(__file__).parent / name
+        with self.lock:
+            active = self.policy.file
+        if target.exists() and not replace:
+            raise ValueError(f'{name} already exists on the robot; tick Replace to overwrite it')
+        if name == active:
+            raise ValueError(f'{name} is the walk policy in use; switch to another one before replacing it')
+        tmp = target.with_name(f'.upload-{os.getpid()}-{name}')
+        try:
+            tmp.write_bytes(data)
+            p = Policy()
+            ok, message = p.load(str(tmp))
+            if not ok:
+                raise ValueError(f'not a usable walk policy: {message}')
+            meta = p.session.get_modelmeta().custom_metadata_map
+            cur = self.policy.session.get_modelmeta().custom_metadata_map
+            if meta.get('joint_names') != cur.get('joint_names'):
+                raise ValueError('its joint order (joint_names) differs from the current walk '
+                                 'policy; export it with scripts/export.py from xgoduck_rl')
+            if p.model_home_deg is None:
+                raise ValueError('it has no trained home (default_joint_pos) in its metadata; '
+                                 'export it with scripts/export.py from xgoduck_rl')
+            os.replace(tmp, target)
+        finally:
+            tmp.unlink(missing_ok=True)
+        home = [round(float(v), 1) for v in p.model_home_deg]
+        return {'ok': True, 'name': name, 'bytes': len(data), 'replaced': bool(replace),
+                'home_hip_pitch_deg': abs(home[2]), 'walk_models': self.walk_models()}
+
     def _apply_tuning(self):
         rl_core.set_imu_bias(*self.tuning['imu_bias_deg'])
         use_model = self.tuning['home_source'] == 'model'

@@ -14,7 +14,9 @@
 
 <div class="tune-card"><small>Walk policy</small>
 <div class="tune-row"><select id="walk-model" class="tune-select"></select></div>
-<dl class="why"><dt>What</dt><dd>The ONNX walk model the robot runs. Any <code>python/xgoduck_walk*.onnx</code> on the robot can be chosen.</dd>
+<div class="tune-row upload-row"><input id="policy-file" type="file" accept=".onnx"><label class="hint"><input id="policy-replace" type="checkbox"> Replace</label><button id="policy-upload">Upload policy</button></div>
+<p class="hint" id="policy-upload-state"></p>
+<dl class="why"><dt>What</dt><dd>The ONNX walk model the robot runs. Any <code>python/xgoduck_walk*.onnx</code> on the robot can be chosen. <b>Upload policy</b> adds one from this computer: an export from xgoduck_rl's <code>scripts/export.py</code> (observation 61, action 14, with its joint order and trained home in the metadata). The robot checks it loads before saving it, and adds <code>xgoduck_walk_</code> to the name if needed. Uploading does not switch to it.</dd>
 <dt>Why</dt><dd>The original <code>xgoduck_walk.onnx</code> was trained on a model without the battery and Uno Q at the back. <code>xgoduck_walk_realcom.onnx</code> was retrained (jimbruges/xgoduck_rl, branch real-mass-com) with the real 825 g mass, the centre of mass 8 mm back, the ±15 mm randomisation of current xgoduck_rl, and the 8–24 ms command delay of this runtime.</dd>
 <dt>Tune</dt><dd>Compare both with the same walk and Last walk. Use Home pose: Model, so each policy uses the home it was trained with (22° for the retrained one). A retrained policy may need less or no Home lean. Switch only while not walking.</dd></dl></div>
 
