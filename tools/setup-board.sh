@@ -15,7 +15,8 @@ echo "XGO Duck board setup in $here"
 
 # Internet and clock: the first build downloads the pinned board core and Python packages,
 # and TLS fails while the clock is wrong (a new board can boot days behind until NTP syncs).
-if curl -s -m 5 -o /dev/null https://pypi.org/simple/; then
+# Headers only: the full index is many MB and a short timeout fails mid-download.
+if curl -sfI -m 10 -o /dev/null https://pypi.org/simple/pip/; then
     ok "internet reachable"
 else
     todo "no internet: connect Wi-Fi (App Lab, or: sudo nmcli --ask dev wifi connect <network>)"
@@ -67,13 +68,14 @@ else
 fi
 
 # Per-robot data. Calibration lives in the servos, but these files hold the robot's zeros,
-# joint directions, tuning and controller mapping: restore them from the old board with
-# tools/robot-data.sh restore (run on the computer, over ADB).
+# joint directions, tuning and controller mapping. Moving a robot to a new board: restore
+# them with tools/robot-data.sh restore (on the computer, over ADB). A new robot starts
+# without them: set up the servos, calibrate, then run the Check page.
 for f in zero_pos.json joint_signs.json tuning.json controller.json; do
     [ -f "data/$f" ] || missing="${missing:-} $f"
 done
 if [ -n "${missing:-}" ]; then
-    todo "no robot data for:$missing (restore with tools/robot-data.sh, or recalibrate)"
+    echo "  note  no robot data ($missing ): fine for a new robot; for a moved one, restore it"
 else
     ok "robot data present"
 fi
